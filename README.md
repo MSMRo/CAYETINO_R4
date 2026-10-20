@@ -2,6 +2,8 @@
 
 Sistema completo y robusto para **Arduino Uno R4 WiFi** con **LCD Keypad Shield**, diseñado para generar, transmitir, almacenar y reproducir señales fisiológicas y de calibración con resolución de **12 bits** en el convertidor digital-analógico (**DAC**) integrado.
 
+![](./img/Captura%20de%20pantalla%202026-10-20%20153809.png)
+
 ---
 
 ## 📑 Resumen de Arquitectura y Hardware
