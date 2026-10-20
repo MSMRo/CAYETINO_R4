@@ -38,7 +38,12 @@ void DacPlayer::onTimerTick() {
   if (!_isPlaying || !_activeFile) return;
 
   uint16_t sample = _storage.getSample(_activeFile, _currentIndex);
-  analogWrite(PIN_DAC_OUTPUT, sample);
+  
+  // Safe hardware scaling to 0 - 3.3V (protects external 3.3V microcontrollers)
+  uint16_t outDac = ((uint32_t)sample * DAC_MAX_COUNTS_3V3) / 4095UL;
+  if (outDac > DAC_MAX_COUNTS_3V3) outDac = DAC_MAX_COUNTS_3V3;
+
+  analogWrite(PIN_DAC_OUTPUT, outDac);
 
   _currentIndex++;
   if (_currentIndex >= _activeFile->length) {

@@ -24,6 +24,7 @@ public:
   uint8_t getTotalFiles();
   WaveformEntry* getFile(uint8_t index);
   WaveformEntry* findFile(const char* name);
+  int8_t findFileIndex(const char* name);
 
   // File write protocol methods
   bool startWrite(const char* filename, uint16_t samplingRate, uint16_t totalSamples);

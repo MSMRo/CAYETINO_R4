@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cayetino R4 - Estación Biomédica DAC 12-bit & Keypad A2</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20width=%2232%22%20height=%2232%22><text y=%2224%22 font-size=%2224%22>⚡</text></svg>">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(regs) {
+        for (let r of regs) r.unregister();
+      });
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <h1>CAYETINO R4</h1>
+        <p>Generador y Reproductor Biomédico (DAC Pin A0 12-bit 0 - 3.3V | Keypad Pin A2)</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="status-pill">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Desconectado</span>
+      </div>
+
+      <button id="btnConnectSerial" class="btn btn-serial" title="Conectar mediante cable USB">
+        🔌 Web Serial
+      </button>
+      <button id="btnConnectBle" class="btn btn-ble" title="Conectar inalámbricamente mediante Bluetooth">
+        📶 Web Bluetooth
+      </button>
+      <button id="btnDisconnect" class="btn btn-outline" disabled>
+        Desconectar
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs (Mobile Touch-Scrollable) -->
+  <div class="main-tabs-container">
+    <nav class="nav-tabs" role="tablist">
+      <button class="nav-tab-btn active" data-tab="tabBasic">🌊 Básicas</button>
+      <button class="nav-tab-btn" data-tab="tabBiomed">🫀 Biomédicas</button>
+      <button class="nav-tab-btn" data-tab="tabMixer">🎛️ Sumador / Mezclador</button>
+      <button class="nav-tab-btn" data-tab="tabFiles">📁 Archivos & NeuroKit2</button>
+      <button class="nav-tab-btn" data-tab="tabFlash">💾 Memoria Flash</button>
+      <button class="nav-tab-btn" data-tab="tabHardware">🛠️ Guía Hardware</button>
+    </nav>
+  </div>
+
+  <!-- Playback Control Bar (Always Accessible) -->
+  <div class="playback-bar">
+    <div class="now-playing-banner" id="nowPlayingLabel">
+      <span>⏹ En espera (DAC A0 reposo)</span>
+    </div>
+    <div class="playback-controls-group">
+      <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; cursor:pointer; margin-right:0.5rem;">
+        <input type="checkbox" id="chkLoop" checked>
+        <span>Bucle Infinito</span>
+      </label>
+      <button id="btnPlay" class="btn btn-success" disabled>
+        ▶ Reproducir (Play)
+      </button>
+      <button id="btnStop" class="btn btn-danger" disabled>
+        ⏹ Detener (Stop)
+      </button>
+    </div>
+  </div>
+
+  <!-- Dashboard Grid -->
+  <main class="dashboard-grid">
+
+    <!-- Left Column: Controls & Configuration Panels -->
+    <aside>
+
+      <!-- PANEL 1: FORMAS DE ONDA BÁSICAS -->
+      <div class="card tab-panel" id="panelBasic">
+        <div class="card-header">
+          <div class="card-title">🌊 Generador de Señales Básicas</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="basicWaveType">Forma de Onda</label>
+          <select id="basicWaveType" class="form-select">
+            <option value="sine">Onda Senoidal Pura</option>
+            <option value="square">Onda Cuadrada</option>
+            <option value="triangle" selected>Onda Triangular</option>
+            <option value="sawtooth">Diente de Sierra (Rampa Ascendente)</option>
+            <option value="invsaw">Diente de Sierra Invertida (Descendente)</option>
+          </select>
+        </div>
+
+        <!-- Frecuencia -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Frecuencia (Hz)</span>
+            <span class="form-label-val" id="lblBasicFreq">2.0 Hz</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="basicFreq" min="0.1" max="50" step="0.1" value="2.0">
+            <input type="number" id="basicFreqNum" class="form-control" min="0.1" max="100" step="0.1" value="2.0">
+          </div>
+        </div>
+
+        <!-- Amplitud Vpp -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Amplitud Pico a Pico (Vpp)</span>
+            <span class="form-label-val" id="lblBasicVpp">2.8 V</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="basicVpp" min="0.1" max="3.3" step="0.1" value="2.8">
+            <input type="number" id="basicVppNum" class="form-control" min="0.1" max="3.3" step="0.1" value="2.8">
+          </div>
+        </div>
+
+        <!-- Offset DC -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Offset DC (V)</span>
+            <span class="form-label-val" id="lblBasicOffset">1.65 V</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="basicOffset" min="0.0" max="3.3" step="0.05" value="1.65">
+            <input type="number" id="basicOffsetNum" class="form-control" min="0.0" max="3.3" step="0.05" value="1.65">
+          </div>
+        </div>
+
+        <!-- Duty Cycle (Cuadrada) -->
+        <div class="form-group" id="grpDutyCycle" style="display:none;">
+          <div class="form-label">
+            <span>Ciclo de Trabajo (Duty Cycle)</span>
+            <span class="form-label-val" id="lblBasicDuty">50%</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="basicDuty" min="1" max="99" step="1" value="50">
+            <input type="number" id="basicDutyNum" class="form-control" min="1" max="99" step="1" value="50">
+          </div>
+        </div>
+
+        <!-- Fase -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Fase Inicial</span>
+            <span class="form-label-val" id="lblBasicPhase">0°</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="basicPhase" min="0" max="360" step="15" value="0">
+            <input type="number" id="basicPhaseNum" class="form-control" min="0" max="360" step="1" value="0">
+          </div>
+        </div>
+
+        <!-- Sampling Rate & Duration -->
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="basicFs">Frecuencia Muestreo (Fs)</label>
+            <select id="basicFs" class="form-select">
+              <option value="100">100 Hz</option>
+              <option value="125">125 Hz</option>
+              <option value="200">200 Hz</option>
+              <option value="250" selected>250 Hz (Estándar)</option>
+              <option value="500">500 Hz</option>
+              <option value="1000">1000 Hz</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="basicDuration">Duración (seg)</label>
+            <input type="number" id="basicDuration" class="form-control" value="4.0" step="0.5" min="1" max="10">
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="card-action-bar">
+          <button id="btnGenerateBasic" class="btn btn-primary" style="flex:1;">
+            ⚡ Generar Básica
+          </button>
+          <button id="btnDownloadBasicCsv" class="btn btn-outline" disabled title="Descargar señal en CSV">
+            💾 CSV
+          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameBasic">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameBasic" class="form-control" value="BASIC_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveBasicToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 2: SEÑALES BIOMÉDICAS -->
+      <div class="card tab-panel" id="panelBiomed" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">🫀 Fisiología & Señales Clínicas</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="biomedType">Tipo de Señal Fisiológica</label>
+          <select id="biomedType" class="form-select">
+            <option value="ecg" selected>ECG Normal Sinusal (Derivación II PQRST)</option>
+            <option value="arrhythmia">ECG Arritmia Ventricular (PVC / Extrasístole)</option>
+            <option value="emg">EMG Superficial (Ráfagas de Contracción)</option>
+            <option value="eeg_alpha">EEG Ritmo Alfa (8 - 13 Hz Relajación)</option>
+            <option value="eeg_beta">EEG Ritmo Beta (13 - 30 Hz Cognición/Alerta)</option>
+            <option value="eeg_theta">EEG Ritmo Theta (4 - 8 Hz Somnolencia)</option>
+            <option value="eeg_delta">EEG Ritmo Delta (0.5 - 4 Hz Sueño Profundo)</option>
+            <option value="rsp">Respiración (RSP Asimétrica Inhalación/Exhalación)</option>
+            <option value="ppg">Fotopletismografía (PPG Pulso Arterial con Dícrota)</option>
+          </select>
+        </div>
+
+        <!-- BPM / Frecuencia fisiológica -->
+        <div class="form-group" id="grpBiomedBpm">
+          <div class="form-label">
+            <span id="lblBiomedRateTitle">Frecuencia Cardíaca (BPM)</span>
+            <span class="form-label-val" id="lblBiomedBpm">72 BPM</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="biomedBpm" min="40" max="180" step="1" value="72">
+            <input type="number" id="biomedBpmNum" class="form-control" min="30" max="220" step="1" value="72">
+          </div>
+        </div>
+
+        <!-- Amplitud Vpp -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Amplitud Pico a Pico (Vpp)</span>
+            <span class="form-label-val" id="lblBiomedVpp">2.8 V</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="biomedVpp" min="0.1" max="3.3" step="0.1" value="2.8">
+            <input type="number" id="biomedVppNum" class="form-control" min="0.1" max="3.3" step="0.1" value="2.8">
+          </div>
+        </div>
+
+        <!-- Offset DC -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Offset DC (V)</span>
+            <span class="form-label-val" id="lblBiomedOffset">1.65 V</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="biomedOffset" min="0.0" max="3.3" step="0.05" value="1.65">
+            <input type="number" id="biomedOffsetNum" class="form-control" min="0.0" max="3.3" step="0.05" value="1.65">
+          </div>
+        </div>
+
+        <!-- Sampling Rate & Duration -->
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="biomedFs">Frecuencia Muestreo (Fs)</label>
+            <select id="biomedFs" class="form-select">
+              <option value="125">125 Hz</option>
+              <option value="200">200 Hz</option>
+              <option value="250" selected>250 Hz (Estándar)</option>
+              <option value="500">500 Hz</option>
+              <option value="1000">1000 Hz</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="biomedDuration">Duración (seg)</label>
+            <input type="number" id="biomedDuration" class="form-control" value="4.0" step="0.5" min="1" max="10">
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="card-action-bar">
+          <button id="btnGenerateBiomed" class="btn btn-primary" style="flex:1;">
+            ⚡ Generar Biomédica
+          </button>
+          <button id="btnDownloadBiomedCsv" class="btn btn-outline" disabled title="Descargar señal en CSV">
+            💾 CSV
+          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameBiomed">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameBiomed" class="form-control" value="BIOMED_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveBiomedToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 3: SUMADOR / MEZCLADOR DE SEÑALES (2 Ó 3 COMPONENTES) -->
+      <div class="card tab-panel" id="panelMixer" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">🎛️ Sumador & Mezclador de Señales</div>
+          <!-- Selector de cantidad de componentes -->
+          <div style="display:flex; gap:0.25rem;">
+            <button id="btnMixMode2" class="op-btn active" style="font-size:0.75rem;">2 Comp</button>
+            <button id="btnMixMode3" class="op-btn" style="font-size:0.75rem;">3 Comp</button>
+          </div>
+        </div>
+
+        <!-- COMPONENTE 1 -->
+        <div class="sub-panel">
+          <div class="sub-panel-title">
+            <span>Componente 1 (Señal Base)</span>
+            <span style="font-size:0.75rem; color:var(--cyan-accent); font-weight:700;">CH 1</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Forma de Onda</label>
+            <select id="mixTypeA" class="form-select">
+              <option value="sine" selected>Senoidal Pura</option>
+              <option value="square">Cuadrada</option>
+              <option value="triangle">Triangular</option>
+              <option value="sawtooth">Diente de Sierra</option>
+              <option value="ecg">ECG Fisiológico</option>
+              <option value="emg">EMG Muscular</option>
+              <option value="eeg_alpha">EEG Ritmo Alfa (10 Hz)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Freq (Hz)</label>
+              <input type="number" id="mixFreqA" class="form-control" value="1.0" min="0.1" max="50" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Amplitud (V)</label>
+              <input type="number" id="mixAmpA" class="form-control" value="2.0" min="0.1" max="4.0" step="0.1">
+            </div>
+          </div>
+          <!-- Mini preview Component 1 -->
+          <div class="mini-canvas-container">
+            <canvas id="canvasPreviewComp1" class="mini-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- OPERADOR 1 -->
+        <div class="operator-selector">
+          <button class="op-btn active" data-op1="add">➕ Sumar (A + B)</button>
+          <button class="op-btn" data-op1="multiply">✖️ Modular (A × B)</button>
+          <button class="op-btn" data-op1="subtract">➖ Restar (A - B)</button>
+        </div>
+
+        <!-- COMPONENTE 2 -->
+        <div class="sub-panel">
+          <div class="sub-panel-title">
+            <span>Componente 2 (Secundaria / Moduladora)</span>
+            <span style="font-size:0.75rem; color:#10b981; font-weight:700;">CH 2</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Forma de Onda</label>
+            <select id="mixTypeB" class="form-select">
+              <option value="sine">Senoidal (Batido / Armónico)</option>
+              <option value="square">Cuadrada</option>
+              <option value="triangle">Triangular</option>
+              <option value="noise_60hz" selected>Ruido Red 60 Hz (Powerline)</option>
+              <option value="noise_50hz">Ruido Red 50 Hz</option>
+              <option value="wander">Deriva de Línea Base (0.25 Hz)</option>
+              <option value="gaussian">Ruido Blanco Gaussiano</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Freq (Hz)</label>
+              <input type="number" id="mixFreqB" class="form-control" value="60.0" min="0.1" max="100" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Amplitud (V)</label>
+              <input type="number" id="mixAmpB" class="form-control" value="0.6" min="0.0" max="4.0" step="0.1">
+            </div>
+          </div>
+          <!-- Mini preview Component 2 -->
+          <div class="mini-canvas-container">
+            <canvas id="canvasPreviewComp2" class="mini-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- OPERADOR 2 (Para modo 3 componentes) -->
+        <div id="wrapOp2" class="operator-selector" style="display:none;">
+          <button class="op-btn active" data-op2="add">➕ Sumar (+ C)</button>
+          <button class="op-btn" data-op2="multiply">✖️ Modular (× C)</button>
+          <button class="op-btn" data-op2="subtract">➖ Restar (- C)</button>
+        </div>
+
+        <!-- COMPONENTE 3 (Opcional) -->
+        <div id="wrapComp3" class="sub-panel" style="display:none;">
+          <div class="sub-panel-title">
+            <span>Componente 3 (Tercer Elemento)</span>
+            <span style="font-size:0.75rem; color:#f59e0b; font-weight:700;">CH 3</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Forma de Onda</label>
+            <select id="mixTypeC" class="form-select">
+              <option value="sine">Senoidal</option>
+              <option value="wander" selected>Deriva de Línea Base (0.25 Hz)</option>
+              <option value="noise_60hz">Ruido 60 Hz</option>
+              <option value="gaussian">Ruido Blanco</option>
+              <option value="square">Cuadrada</option>
+              <option value="triangle">Triangular</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Freq (Hz)</label>
+              <input type="number" id="mixFreqC" class="form-control" value="0.25" min="0.1" max="100" step="0.05">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Amplitud (V)</label>
+              <input type="number" id="mixAmpC" class="form-control" value="0.4" min="0.0" max="4.0" step="0.1">
+            </div>
+          </div>
+          <!-- Mini preview Component 3 -->
+          <div class="mini-canvas-container">
+            <canvas id="canvasPreviewComp3" class="mini-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Master Output Settings -->
+        <div class="sub-panel">
+          <div class="sub-panel-title">
+            <span>Ajustes Maestros de Salida DAC</span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Escala General</label>
+              <input type="number" id="mixMasterGain" class="form-control" value="1.0" min="0.1" max="3.0" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Offset Maestro (V)</label>
+              <input type="number" id="mixMasterOffset" class="form-control" value="1.65" min="0.0" max="3.3" step="0.05">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Frecuencia Fs</label>
+              <select id="mixFs" class="form-select">
+                <option value="125">125 Hz</option>
+                <option value="250" selected>250 Hz (Estándar)</option>
+                <option value="500">500 Hz</option>
+                <option value="1000">1000 Hz</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Duración (s)</label>
+              <input type="number" id="mixDuration" class="form-control" value="4.0" min="1" max="10" step="0.5">
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="card-action-bar">
+          <button id="btnGenerateMix" class="btn btn-primary" style="flex:1;">
+            ⚡ Generar Mezcla
+          </button>
+          <button id="btnDownloadMixCsv" class="btn btn-outline" disabled title="Descargar mezcla en CSV">
+            💾 CSV
+          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameMix">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameMix" class="form-control" value="MIX_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveMixToArduino" class="btn btn-flash-save" disabled title="Grabar mezcla en memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 4: ARCHIVOS & NEUROKIT2 -->
+      <div class="card tab-panel" id="panelFiles" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">📁 Archivos & NeuroKit2</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Muestras Pre-generadas (NeuroKit2)</label>
+          <select id="sampleFiles" class="form-select">
+            <option value="">-- Cargar archivo de muestra --</option>
+            <option value="ECG_NORMAL_72BPM.csv">ECG Normal 72 BPM (NeuroKit2)</option>
+            <option value="ECG_ARRHYTHMIA.csv">ECG Arritmia Ventricular (NeuroKit2)</option>
+            <option value="EMG_CONTRACTION.csv">EMG Contracción Muscular (NeuroKit2)</option>
+            <option value="CAL_SINE_1HZ.csv">Seno 1 Hz (Calibración DAC)</option>
+            <option value="CAL_TRIANGLE_2HZ.csv">Triángulo 2 Hz (Calibración DAC)</option>
+          </select>
+        </div>
+
+        <div class="drop-zone" id="dropZone">
+          <div class="drop-zone-icon">📁</div>
+          <p><strong>Arrastra un archivo .CSV o .TXT aquí</strong></p>
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">
+            O pulsa para seleccionar desde tu dispositivo
+          </p>
+          <input type="file" id="fileInput" accept=".csv,.txt" style="display:none;">
+        </div>
+
+        <!-- Action Buttons for Files Tab -->
+        <div class="card-action-bar" style="margin-top:0.85rem;">
+          <button id="btnDownloadFileCsv" class="btn btn-outline" disabled style="flex:1;">
+            💾 Descargar CSV
+          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameFile">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameFile" class="form-control" value="FILE_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveFileToArduino" class="btn btn-flash-save" disabled title="Grabar archivo en la memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 5: MEMORIA FLASH ARDUINO -->
+      <div class="card tab-panel" id="panelFlash" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">💾 Memoria Flash del Arduino Uno R4</div>
+          <button id="btnRefreshFiles" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem;" disabled>
+            🔄 Actualizar
+          </button>
+        </div>
+
+        <div class="form-row" style="align-items:flex-end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="uploadFilename">Nombre Destino en Arduino</label>
+            <input type="text" id="uploadFilename" class="form-control" value="CUSTOM_01.CSV" maxlength="16">
+          </div>
+          <button id="btnUpload" class="btn btn-primary" disabled style="height:40px;">
+            📤 Enviar a Flash
+          </button>
+        </div>
+
+        <!-- Barra de Progreso -->
+        <div class="progress-bar-container" id="uploadProgressContainer">
+          <div class="progress-bar-fill" id="uploadProgressBar"></div>
+        </div>
+
+        <!-- Tabla de archivos -->
+        <div class="table-container">
+          <table class="file-table">
+            <thead>
+              <tr>
+                <th>Archivo</th>
+                <th>Almacén</th>
+                <th>Muestras / Fs</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="fileTableBody">
+              <tr>
+                <td colspan="4" style="text-align:center; color:#64748b;">
+                  Conéctate al Arduino para ver los archivos disponibles
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- PANEL 6: GUÍA HARDWARE & PINOUT -->
+      <div class="card tab-panel" id="panelHardware" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">🛠️ Guía Hardware & Modificación A2</div>
+        </div>
+
+        <div class="notice-box" style="margin-top:0;">
+          <h4>🔌 Asignación de Pines Clave</h4>
+          <p><strong>• Pin A0:</strong> Salida del DAC de 12 bits (escalado seguro 0 a 3.3V para compatibilidad con sistemas externos). Mantener libre de cargas resistivas.</p>
+          <p><strong>• Pin A2:</strong> Entrada ADC de la red de resistencias de botones del LCD Keypad Shield (modificación física aplicada).</p>
+          <p><strong>• Pines D4 - D9:</strong> Bus de control y datos en 4 bits del display LCD 16x2.</p>
+          <p><strong>• Pin D10:</strong> Control de retroiluminación del LCD.</p>
+        </div>
+
+        <div style="font-size:0.8rem; line-height:1.5; color:var(--text-muted); margin-top:0.75rem;">
+          <p><strong>Instrucciones de verificación física:</strong></p>
+          <ol style="margin-left:1.25rem; margin-top:0.35rem;">
+            <li>Con el shield desconectado, verificar con multímetro continuidad nula (circuito abierto) entre el pin A0 del shield y el pin analógico del botón.</li>
+            <li>Verificar continuidad directa (cerca de 0 Ω) entre el puente soldado y el pin A2 del shield.</li>
+            <li>Al conectar y presionar los botones RIGHT, UP, DOWN, LEFT, SELECT, el display LCD debe navegar por los archivos en memoria de manera autónoma.</li>
+          </ol>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Right Column: Visualizer, Quick Playback & Logs -->
+    <section>
+
+      <!-- Oscilloscope Visualizer Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📈 Osciloscopio Web (Vista Previa DAC 12-bit: 0V - 3.3V)</div>
+        </div>
+
+        <div class="viewer-container">
+          <canvas id="waveformCanvas"></canvas>
+        </div>
+
+        <div class="viewer-stats">
+          <div class="stat-item">Señal: <span id="statName">--</span></div>
+          <div class="stat-item">Muestras: <span id="statSamples">0</span></div>
+          <div class="stat-item">Duración: <span id="statDuration">0.00s</span></div>
+          <div class="stat-item">Fs: <span id="statFs">250 Hz</span></div>
+          <div class="stat-item">Vpp Estimado: <span id="statVpp">0.00 V</span></div>
+        </div>
+      </div>
+
+      <!-- Console / Terminal Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title" style="font-size:0.8rem;">📟 Registro de Comunicación Serial / BLE</div>
+          <button id="btnClearLogs" class="btn btn-outline" style="padding:0.15rem 0.45rem; font-size:0.7rem;">
+            Limpiar
+          </button>
+        </div>
+        <div class="terminal-window" id="terminalOutput"></div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ES6 Modules Entry Point -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

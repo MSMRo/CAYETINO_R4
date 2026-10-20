@@ -84,6 +84,15 @@ WaveformEntry* FileStorage::findFile(const char* name) {
   return nullptr;
 }
 
+int8_t FileStorage::findFileIndex(const char* name) {
+  for (uint8_t i = 0; i < _totalFiles; i++) {
+    if (strcasecmp(_entries[i].name, name) == 0) {
+      return (int8_t)i;
+    }
+  }
+  return -1;
+}
+
 bool FileStorage::startWrite(const char* filename, uint16_t samplingRate, uint16_t totalSamples) {
   if (totalSamples > MAX_CUSTOM_SAMPLES) {
     return false; // exceeds buffer capacity

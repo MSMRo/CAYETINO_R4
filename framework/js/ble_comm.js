@@ -91,8 +91,10 @@ export class BleComm {
     const encoder = new TextEncoder();
     const data = encoder.encode(text);
     
-    // BLE packet chunking: 20 bytes is universal MTU default for BLE
-    const chunkSize = 20;
+    // The Arduino Uno R4 rxCharacteristic buffer is 64 bytes.
+    // Setting chunkSize = 60 ensures all commands (PLAY, STOP, PING, WRITE)
+    // are transmitted in ONE atomic BLE packet without any artificial splitting!
+    const chunkSize = 60;
     for (let i = 0; i < data.length; i += chunkSize) {
       const chunk = data.slice(i, i + chunkSize);
       try {
@@ -108,7 +110,7 @@ export class BleComm {
       
       // Delay between chunks to let Arduino Uno R4 / ESP32 BLE stack process
       if (data.length > chunkSize) {
-        await new Promise(r => setTimeout(r, 15));
+        await new Promise(r => setTimeout(r, 20));
       }
     }
   }

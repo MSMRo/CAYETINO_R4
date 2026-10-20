@@ -65,7 +65,7 @@ private:
 } blePrint;
 #endif
 
-// --- CUSTOM LCD CHARACTERS ---
+// --- CUSTOM LCD CHARACTERS (5x8) ---
 byte charHeart[8] = {
   B00000,
   B01010,
@@ -88,11 +88,67 @@ byte charPlay[8] = {
   B00000
 };
 
-// --- LOCAL MENU STATE ---
+byte charStop[8] = {
+  B00000,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B00000,
+  B00000
+};
+
+byte charUsb[8] = {
+  B00100,
+  B01110,
+  B10101,
+  B00100,
+  B01110,
+  B01110,
+  B00100,
+  B00000
+};
+
+byte charBle[8] = {
+  B01100,
+  B01010,
+  B10100,
+  B01100,
+  B10100,
+  B01010,
+  B01100,
+  B00000
+};
+
+// --- LOCAL MENU & CONNECTION STATE ---
 uint8_t selectedFileIndex = 0;
+uint8_t detailViewIndex = 0; // 0: Fs & Muestras, 1: Duracion, 2: Enlace PC, 3: DAC Pin A0
 bool lastPlayState = false;
 unsigned long lastLcdUpdate = 0;
 bool heartBeatBlink = false;
+
+unsigned long lastSerialActivity = 0;
+unsigned long lastBleActivity = 0;
+
+enum LinkType {
+  LINK_NONE = 0,
+  LINK_USB,
+  LINK_BLE
+};
+
+LinkType getActiveLinkType() {
+#if ENABLE_BLE
+  BLEDevice central = BLE.central();
+  if (central && central.connected()) {
+    return LINK_BLE;
+  }
+#endif
+  if (Serial || (millis() - lastSerialActivity < 8000)) {
+    return LINK_USB;
+  }
+  return LINK_NONE;
+}
 
 // Serial and BLE reception buffers
 char serialBuffer[128];
@@ -119,14 +175,18 @@ void setup() {
   lcd.begin(16, 2);
   lcd.createChar(0, charHeart);
   lcd.createChar(1, charPlay);
+  lcd.createChar(2, charStop);
+  lcd.createChar(3, charUsb);
+  lcd.createChar(4, charBle);
 
   // Splash Screen
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("CAYETINO R4 BIO");
+  lcd.print("CAYETINO R4 BIO ");
   lcd.setCursor(0, 1);
-  lcd.print("DAC:A0  KEYS:A2");
-  delay(1400);
+  lcd.print("DAC:A0  KEYS:A2 ");
+  delay(1200);
+  lcd.clear(); // Limpieza total para evitar residuos visuales en DDRAM
 
   // 3. Initialize Keypad on Pin A2
   keypad.init();
@@ -214,11 +274,36 @@ void handleKeypad() {
       updateLcdDisplay(true);
       break;
 
+    case KEY_LEFT:
+      // Navegar a la izquierda entre las vistas de detalles de la fila 2
+      if (detailViewIndex > 0) {
+        detailViewIndex--;
+      } else {
+        detailViewIndex = 3; // wrap around (0 a 3)
+      }
+      updateLcdDisplay(true);
+      break;
+
+    case KEY_RIGHT:
+      // Navegar a la derecha entre las vistas de detalles de la fila 2
+      detailViewIndex = (detailViewIndex + 1) % 4;
+      updateLcdDisplay(true);
+      break;
+
     case KEY_SELECT: {
-      // Toggle Play / Stop
       if (dacPlayer.isPlaying()) {
-        dacPlayer.stop();
-        Serial.println("[LOCAL] Reproduccion detenida.");
+        const WaveformEntry* active = dacPlayer.getActiveFile();
+        WaveformEntry* cur = fileStorage.getFile(selectedFileIndex);
+        if (cur && active && strcmp(cur->name, active->name) == 0) {
+          // Pulso SELECT en la señal activa -> Detener
+          dacPlayer.stop();
+          Serial.println("[LOCAL] Reproduccion detenida.");
+        } else if (cur) {
+          // Pulso SELECT en otra senal navegada -> Cambiar a esa senal
+          dacPlayer.play(cur, true);
+          Serial.print("[LOCAL] Reproduciendo: ");
+          Serial.println(cur->name);
+        }
       } else {
         WaveformEntry* entry = fileStorage.getFile(selectedFileIndex);
         if (entry) {
@@ -231,64 +316,88 @@ void handleKeypad() {
       break;
     }
 
-    case KEY_LEFT: {
-      // Decrease playback sample rate
-      uint16_t curFs = dacPlayer.getSampleRate();
-      if (curFs > 50) {
-        curFs = curFs <= 125 ? 50 : (curFs <= 250 ? 125 : 250);
-        dacPlayer.setSampleRate(curFs);
-        updateLcdDisplay(true);
-      }
-      break;
-    }
-
-    case KEY_RIGHT: {
-      // Increase playback sample rate
-      uint16_t curFs = dacPlayer.getSampleRate();
-      if (curFs < 1000) {
-        curFs = curFs >= 500 ? 1000 : (curFs >= 250 ? 500 : 250);
-        dacPlayer.setSampleRate(curFs);
-        updateLcdDisplay(true);
-      }
-      break;
-    }
-
     default:
       break;
   }
 }
 
 void updateLcdDisplay(bool forceFull) {
-  WaveformEntry* entry = fileStorage.getFile(selectedFileIndex);
-  if (!entry) return;
+  uint8_t totalFiles = fileStorage.getTotalFiles();
+  if (totalFiles == 0) {
+    lcd.setCursor(0, 0);
+    lcd.print("SIN ARCHIVOS    ");
+    lcd.setCursor(0, 1);
+    lcd.print("                ");
+    return;
+  }
 
   bool isPlaying = dacPlayer.isPlaying();
 
-  // Line 1: [Icono] NombreArchivo [♥/STP]
-  lcd.setCursor(0, 0);
+  // Si esta reproduciendo activamente, mantener sincronizado con el archivo en ejecucion
   if (isPlaying) {
-    lcd.write(byte(1)); // Play arrow
+    const WaveformEntry* activeEntry = dacPlayer.getActiveFile();
+    if (activeEntry) {
+      int8_t activeIdx = fileStorage.findFileIndex(activeEntry->name);
+      if (activeIdx >= 0) {
+        selectedFileIndex = activeIdx;
+      }
+    }
+  }
+
+  if (selectedFileIndex >= totalFiles) {
+    selectedFileIndex = 0;
+  }
+
+  WaveformEntry* entry = fileStorage.getFile(selectedFileIndex);
+  if (!entry) return;
+
+  LinkType link = getActiveLinkType();
+
+  // -------------------------------------------------------------
+  // LINEA 1 (16 CARACTERES EXACTOS)
+  // Col 0:      Icono Play (▶) o Stop (■)
+  // Col 1..12:  Nombre del archivo limpio sin .CSV (12 caracteres)
+  // Col 13:     Espacio (' ')
+  // Col 14:     Icono Conexión (USB ⑂ / BLE ᛒ / ' ')
+  // Col 15:     Latido (♥) o reposo (' ')
+  // -------------------------------------------------------------
+  lcd.setCursor(0, 0);
+
+  // Col 0: Estado Play / Stop
+  if (isPlaying) {
+    lcd.write(byte(1)); // Play (▶)
+  } else {
+    lcd.write(byte(2)); // Stop (■)
+  }
+
+  // Col 1..12: Nombre limpio sin extensión .CSV
+  char cleanName[16];
+  strncpy(cleanName, entry->name, 15);
+  cleanName[15] = '\0';
+  char* dot = strrchr(cleanName, '.');
+  if (dot) *dot = '\0';
+
+  char nameBuf[13];
+  snprintf(nameBuf, sizeof(nameBuf), "%-12.12s", cleanName);
+  lcd.print(nameBuf);
+
+  // Col 13: Espacio
+  lcd.print(" ");
+
+  // Col 14: Icono de enlace de comunicación
+  if (link == LINK_USB) {
+    lcd.write(byte(3)); // USB Cable Icon
+  } else if (link == LINK_BLE) {
+    lcd.write(byte(4)); // BLE Icon
   } else {
     lcd.print(" ");
   }
-  
-  // Format filename (up to 12 chars)
-  char nameBuf[13];
-  strncpy(nameBuf, entry->name, 12);
-  nameBuf[12] = '\0';
-  lcd.print(nameBuf);
 
-  // Fill spaces to align icon
-  int len = strlen(nameBuf);
-  for (int i = len; i < 12; i++) {
-    lcd.print(" ");
-  }
-
-  // Right-most status icon
+  // Col 15: Indicador de latido
   if (isPlaying) {
     heartBeatBlink = !heartBeatBlink;
     if (heartBeatBlink) {
-      lcd.write(byte(0)); // Heart
+      lcd.write(byte(0)); // Latido Corazón (♥)
     } else {
       lcd.print(" ");
     }
@@ -296,19 +405,73 @@ void updateLcdDisplay(bool forceFull) {
     lcd.print(" ");
   }
 
-  // Line 2: Fs:250Hz  1000pt
-  lcd.setCursor(0, 1);
-  lcd.print("Fs:");
-  lcd.print(dacPlayer.getSampleRate());
-  lcd.print("Hz ");
-  
-  lcd.print(entry->length);
-  lcd.print("pt ");
-  if (entry->isRom) {
-    lcd.print("ROM");
-  } else {
-    lcd.print("FLS");
+  // -------------------------------------------------------------
+  // LINEA 2 (16 CARACTERES EXACTOS)
+  // Navegación interactiva con LEFT / RIGHT (detailViewIndex: 0..3)
+  // -------------------------------------------------------------
+  char line2[17];
+  memset(line2, ' ', 16);
+  line2[16] = '\0';
+
+  switch (detailViewIndex) {
+    case 0:
+      // Vista 0: Frecuencia (Fs), Muestras (pt) y Tipo (ROM/FLS)
+      // Ej: "250Hz  500pt ROM " o "500Hz 1000pt FLASH"
+      snprintf(line2, sizeof(line2), "%3uHz %4upt %-5s",
+               entry->samplingRate,
+               entry->length,
+               entry->isRom ? "ROM" : "FLASH");
+      break;
+
+    case 1: {
+      // Vista 1: Duración calculada en segundos
+      // Ej: "Dur:2.00s  [ROM]"
+      uint16_t fs = entry->samplingRate > 0 ? entry->samplingRate : 250;
+      float durSec = (float)entry->length / (float)fs;
+      char durStr[8];
+      dtostrf(durSec, 4, 2, durStr);
+      snprintf(line2, sizeof(line2), "Dur:%ss %-7s", durStr, entry->isRom ? "[ROM]" : "[FLASH]");
+      break;
+    }
+
+    case 2:
+      // Vista 2: Estado de conexión PC / Cable / BLE
+      if (link == LINK_USB) {
+        snprintf(line2, sizeof(line2), "PC: USB CABLE OK");
+      } else if (link == LINK_BLE) {
+        snprintf(line2, sizeof(line2), "PC: BLE ACTIVO ");
+      } else {
+        snprintf(line2, sizeof(line2), "PC: DESCONECTADO");
+      }
+      break;
+
+    case 3:
+      // Vista 3: Salida DAC Pin A0 y estado de reproducción
+      if (isPlaying) {
+        snprintf(line2, sizeof(line2), "DAC A0: EN PLAY ");
+      } else {
+        snprintf(line2, sizeof(line2), "DAC A0: EN PAUSA");
+      }
+      break;
+
+    default:
+      detailViewIndex = 0;
+      snprintf(line2, sizeof(line2), "%3uHz %4upt %-5s",
+               entry->samplingRate,
+               entry->length,
+               entry->isRom ? "ROM" : "FLASH");
+      break;
   }
+
+  // Garantizar exactamente 16 caracteres completando con espacios
+  int len2 = strlen(line2);
+  while (len2 < 16) {
+    line2[len2++] = ' ';
+  }
+  line2[16] = '\0';
+
+  lcd.setCursor(0, 1);
+  lcd.print(line2);
 }
 
 // ----------------------------------------------------------------------------
@@ -317,6 +480,7 @@ void updateLcdDisplay(bool forceFull) {
 void handleSerialInput() {
   while (Serial.available()) {
     char c = Serial.read();
+    lastSerialActivity = millis();
     if (c == '\r') continue;
     if (c == '\n') {
       serialBuffer[serialBufferIdx] = '\0';
@@ -338,9 +502,11 @@ void handleBleInput() {
   BLEDevice central = BLE.central();
   if (central && central.connected()) {
     if (rxChar.written()) {
-      String received = rxChar.value();
-      for (unsigned int i = 0; i < received.length(); i++) {
-        char c = received[i];
+      lastBleActivity = millis();
+      String str = rxChar.value();
+      int len = str.length();
+      for (int i = 0; i < len; i++) {
+        char c = str[i];
         if (c == '\r') continue;
         if (c == '\n') {
           bleBuffer[bleBufferIdx] = '\0';

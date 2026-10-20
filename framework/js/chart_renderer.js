@@ -160,7 +160,7 @@ export class WaveformRenderer {
       ctx.fillText('⚡ Osciloscopio en espera. Selecciona una señal o pulsa "Generar" para comenzar.', w / 2, h / 2 - 14);
       ctx.fillStyle = '#64748b';
       ctx.font = '11px ui-monospace, monospace';
-      ctx.fillText('Línea punteada central: Nivel de reposo DAC A0 (2.5V / 2048)', w / 2, h / 2 + 12);
+      ctx.fillText('Línea punteada central: Nivel de reposo DAC A0 (1.65V / 1351)', w / 2, h / 2 + 12);
       return;
     }
 
@@ -206,7 +206,7 @@ export class WaveformRenderer {
       const sampleIdx = Math.round(hoverFraction * (n - 1));
       const val = this.samples[sampleIdx];
       const timeSec = (sampleIdx / this.samplingRate).toFixed(3);
-      const voltage = ((val / 4095.0) * 5.0).toFixed(3);
+      const voltage = ((val / 4095.0) * 3.3).toFixed(3);
       const valY = h - (val / 4095.0) * (h - 24) - 12;
 
       // Vertical line
@@ -289,9 +289,9 @@ export class WaveformRenderer {
     ctx.font = '10px ui-monospace, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('5.0V (4095)', 6, 4);
+    ctx.fillText('3.3V (2703)', 6, 4);
     ctx.textBaseline = 'middle';
-    ctx.fillText('2.5V (2048)', 6, h / 2);
+    ctx.fillText('1.65V (1351)', 6, h / 2);
     ctx.textBaseline = 'bottom';
     ctx.fillText('0.0V (0)', 6, h - 4);
   }

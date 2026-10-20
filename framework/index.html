@@ -22,7 +22,7 @@
       <div class="brand-icon">⚡</div>
       <div>
         <h1>CAYETINO R4</h1>
-        <p>Generador y Reproductor Biomédico (DAC Pin A0 12-bit | Keypad Pin A2)</p>
+        <p>Generador y Reproductor Biomédico (DAC Pin A0 12-bit 0 - 3.3V | Keypad Pin A2)</p>
       </div>
     </div>
 
@@ -114,11 +114,11 @@
         <div class="form-group">
           <div class="form-label">
             <span>Amplitud Pico a Pico (Vpp)</span>
-            <span class="form-label-val" id="lblBasicVpp">4.0 V</span>
+            <span class="form-label-val" id="lblBasicVpp">2.8 V</span>
           </div>
           <div class="slider-container">
-            <input type="range" id="basicVpp" min="0.1" max="5.0" step="0.1" value="4.0">
-            <input type="number" id="basicVppNum" class="form-control" min="0.1" max="5.0" step="0.1" value="4.0">
+            <input type="range" id="basicVpp" min="0.1" max="3.3" step="0.1" value="2.8">
+            <input type="number" id="basicVppNum" class="form-control" min="0.1" max="3.3" step="0.1" value="2.8">
           </div>
         </div>
 
@@ -126,11 +126,11 @@
         <div class="form-group">
           <div class="form-label">
             <span>Offset DC (V)</span>
-            <span class="form-label-val" id="lblBasicOffset">2.5 V</span>
+            <span class="form-label-val" id="lblBasicOffset">1.65 V</span>
           </div>
           <div class="slider-container">
-            <input type="range" id="basicOffset" min="0.0" max="5.0" step="0.1" value="2.5">
-            <input type="number" id="basicOffsetNum" class="form-control" min="0.0" max="5.0" step="0.1" value="2.5">
+            <input type="range" id="basicOffset" min="0.0" max="3.3" step="0.05" value="1.65">
+            <input type="number" id="basicOffsetNum" class="form-control" min="0.0" max="3.3" step="0.05" value="1.65">
           </div>
         </div>
 
@@ -185,9 +185,19 @@
           <button id="btnDownloadBasicCsv" class="btn btn-outline" disabled title="Descargar señal en CSV">
             💾 CSV
           </button>
-          <button id="btnSaveBasicToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
-            📤 Grabar en Arduino
-          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameBasic">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameBasic" class="form-control" value="BASIC_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveBasicToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
         </div>
       </div>
 
@@ -228,11 +238,11 @@
         <div class="form-group">
           <div class="form-label">
             <span>Amplitud Pico a Pico (Vpp)</span>
-            <span class="form-label-val" id="lblBiomedVpp">3.3 V</span>
+            <span class="form-label-val" id="lblBiomedVpp">2.8 V</span>
           </div>
           <div class="slider-container">
-            <input type="range" id="biomedVpp" min="0.5" max="5.0" step="0.1" value="3.3">
-            <input type="number" id="biomedVppNum" class="form-control" min="0.1" max="5.0" step="0.1" value="3.3">
+            <input type="range" id="biomedVpp" min="0.1" max="3.3" step="0.1" value="2.8">
+            <input type="number" id="biomedVppNum" class="form-control" min="0.1" max="3.3" step="0.1" value="2.8">
           </div>
         </div>
 
@@ -240,11 +250,11 @@
         <div class="form-group">
           <div class="form-label">
             <span>Offset DC (V)</span>
-            <span class="form-label-val" id="lblBiomedOffset">2.5 V</span>
+            <span class="form-label-val" id="lblBiomedOffset">1.65 V</span>
           </div>
           <div class="slider-container">
-            <input type="range" id="biomedOffset" min="0.0" max="5.0" step="0.1" value="2.5">
-            <input type="number" id="biomedOffsetNum" class="form-control" min="0.0" max="5.0" step="0.1" value="2.5">
+            <input type="range" id="biomedOffset" min="0.0" max="3.3" step="0.05" value="1.65">
+            <input type="number" id="biomedOffsetNum" class="form-control" min="0.0" max="3.3" step="0.05" value="1.65">
           </div>
         </div>
 
@@ -274,9 +284,19 @@
           <button id="btnDownloadBiomedCsv" class="btn btn-outline" disabled title="Descargar señal en CSV">
             💾 CSV
           </button>
-          <button id="btnSaveBiomedToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
-            📤 Grabar en Arduino
-          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameBiomed">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameBiomed" class="form-control" value="BIOMED_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveBiomedToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
         </div>
       </div>
 
@@ -418,7 +438,7 @@
             </div>
             <div class="form-group">
               <label class="form-label">Offset Maestro (V)</label>
-              <input type="number" id="mixMasterOffset" class="form-control" value="2.5" min="0.0" max="5.0" step="0.1">
+              <input type="number" id="mixMasterOffset" class="form-control" value="1.65" min="0.0" max="3.3" step="0.05">
             </div>
           </div>
           <div class="form-row">
@@ -446,9 +466,19 @@
           <button id="btnDownloadMixCsv" class="btn btn-outline" disabled title="Descargar mezcla en CSV">
             💾 CSV
           </button>
-          <button id="btnSaveMixToArduino" class="btn btn-flash-save" disabled title="Grabar mezcla en memoria Flash del Arduino">
-            📤 Grabar en Arduino
-          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameMix">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameMix" class="form-control" value="MIX_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveMixToArduino" class="btn btn-flash-save" disabled title="Grabar mezcla en memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
         </div>
       </div>
 
@@ -480,13 +510,23 @@
         </div>
 
         <!-- Action Buttons for Files Tab -->
-        <div class="card-action-bar" style="margin-top:1rem;">
+        <div class="card-action-bar" style="margin-top:0.85rem;">
           <button id="btnDownloadFileCsv" class="btn btn-outline" disabled style="flex:1;">
             💾 Descargar CSV
           </button>
-          <button id="btnSaveFileToArduino" class="btn btn-flash-save" disabled style="flex:1;">
-            📤 Grabar en Arduino
-          </button>
+        </div>
+
+        <div class="form-group" style="margin-top:0.85rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+          <label class="form-label" for="nameFile">
+            <span>Nombre para Grabar en Arduino</span>
+            <span style="font-size:0.7rem; color:var(--text-dim); text-transform:none;">(Máx. 16 caracteres .CSV)</span>
+          </label>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input type="text" id="nameFile" class="form-control" value="FILE_01.CSV" maxlength="16" style="flex:1;">
+            <button id="btnSaveFileToArduino" class="btn btn-flash-save" disabled title="Grabar archivo en la memoria Flash del Arduino">
+              📤 Grabar en Arduino
+            </button>
+          </div>
         </div>
       </div>
 
@@ -544,7 +584,7 @@
 
         <div class="notice-box" style="margin-top:0;">
           <h4>🔌 Asignación de Pines Clave</h4>
-          <p><strong>• Pin A0:</strong> Salida del DAC de 12 bits (0 a 4095, 0 a 5.0V). Mantener completamente libre de cargas resistivas.</p>
+          <p><strong>• Pin A0:</strong> Salida del DAC de 12 bits (escalado seguro 0 a 3.3V para compatibilidad con sistemas externos). Mantener libre de cargas resistivas.</p>
           <p><strong>• Pin A2:</strong> Entrada ADC de la red de resistencias de botones del LCD Keypad Shield (modificación física aplicada).</p>
           <p><strong>• Pines D4 - D9:</strong> Bus de control y datos en 4 bits del display LCD 16x2.</p>
           <p><strong>• Pin D10:</strong> Control de retroiluminación del LCD.</p>
@@ -568,7 +608,7 @@
       <!-- Oscilloscope Visualizer Card -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">📈 Osciloscopio Web (Vista Previa DAC 12-bit)</div>
+          <div class="card-title">📈 Osciloscopio Web (Vista Previa DAC 12-bit: 0V - 3.3V)</div>
         </div>
 
         <div class="viewer-container">

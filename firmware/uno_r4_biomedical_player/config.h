@@ -22,9 +22,13 @@
 #define PIN_LCD_D7           7
 #define PIN_LCD_BACKLIGHT    10
 
-// --- DAC CONFIGURATION ---
+// --- DAC CONFIGURATION (3.3V MAX SAFE OUTPUT) ---
+// Uno R4 AVCC0 is 5.0V; 12-bit DAC: 0 to 4095
+// Maximum 3.3V output: (3.3V / 5.0V) * 4095 = 2703 counts
+// Midpoint 1.65V reference: 2703 / 2 = 1351 counts
 #define DAC_RESOLUTION_BITS  12     // 0 to 4095 levels
-#define DAC_BASELINE_LEVEL   2048   // Midpoint DC level (~2.5V reference)
+#define DAC_MAX_COUNTS_3V3   2703   // (3.3V / 5.0V) * 4095 = 2703
+#define DAC_BASELINE_LEVEL   1351   // Midpoint DC level (~1.65V reference)
 #define DEFAULT_SAMPLING_FS  250    // Default 250 Hz sample rate (4.0 ms period)
 
 // --- KEYPAD THRESHOLDS (10-bit ADC: 0 - 1023 on Pin A2) ---

@@ -83,6 +83,7 @@ class App {
     this.lblBasicPhase = document.getElementById('lblBasicPhase');
     this.basicFs = document.getElementById('basicFs');
     this.basicDuration = document.getElementById('basicDuration');
+    this.nameBasic = document.getElementById('nameBasic');
     this.btnGenerateBasic = document.getElementById('btnGenerateBasic');
     this.btnDownloadBasicCsv = document.getElementById('btnDownloadBasicCsv');
     this.btnSaveBasicToArduino = document.getElementById('btnSaveBasicToArduino');
@@ -102,6 +103,7 @@ class App {
     this.lblBiomedOffset = document.getElementById('lblBiomedOffset');
     this.biomedFs = document.getElementById('biomedFs');
     this.biomedDuration = document.getElementById('biomedDuration');
+    this.nameBiomed = document.getElementById('nameBiomed');
     this.btnGenerateBiomed = document.getElementById('btnGenerateBiomed');
     this.btnDownloadBiomedCsv = document.getElementById('btnDownloadBiomedCsv');
     this.btnSaveBiomedToArduino = document.getElementById('btnSaveBiomedToArduino');
@@ -132,6 +134,7 @@ class App {
     this.mixMasterOffset = document.getElementById('mixMasterOffset');
     this.mixFs = document.getElementById('mixFs');
     this.mixDuration = document.getElementById('mixDuration');
+    this.nameMix = document.getElementById('nameMix');
     this.btnGenerateMix = document.getElementById('btnGenerateMix');
     this.btnDownloadMixCsv = document.getElementById('btnDownloadMixCsv');
     this.btnSaveMixToArduino = document.getElementById('btnSaveMixToArduino');
@@ -140,6 +143,7 @@ class App {
     this.sampleFiles = document.getElementById('sampleFiles');
     this.dropZone = document.getElementById('dropZone');
     this.fileInput = document.getElementById('fileInput');
+    this.nameFile = document.getElementById('nameFile');
     this.btnDownloadFileCsv = document.getElementById('btnDownloadFileCsv');
     this.btnSaveFileToArduino = document.getElementById('btnSaveFileToArduino');
 
@@ -218,7 +222,10 @@ class App {
 
     this.btnGenerateBasic.addEventListener('click', () => this.generateActiveSignal('basic'));
     this.btnDownloadBasicCsv.addEventListener('click', () => this.downloadCurrentCsv());
-    this.btnSaveBasicToArduino.addEventListener('click', () => this.uploadSignalToDevice());
+    this.btnSaveBasicToArduino.addEventListener('click', () => {
+      const name = this.nameBasic ? this.nameBasic.value : null;
+      this.uploadSignalToDevice(name);
+    });
 
     // Biomed Controls
     this.biomedType.addEventListener('change', () => {
@@ -239,7 +246,10 @@ class App {
 
     this.btnGenerateBiomed.addEventListener('click', () => this.generateActiveSignal('biomed'));
     this.btnDownloadBiomedCsv.addEventListener('click', () => this.downloadCurrentCsv());
-    this.btnSaveBiomedToArduino.addEventListener('click', () => this.uploadSignalToDevice());
+    this.btnSaveBiomedToArduino.addEventListener('click', () => {
+      const name = this.nameBiomed ? this.nameBiomed.value : null;
+      this.uploadSignalToDevice(name);
+    });
 
     // Mixer Component Count Toggle (2 or 3 components)
     this.btnMixMode2.addEventListener('click', () => {
@@ -292,7 +302,10 @@ class App {
 
     this.btnGenerateMix.addEventListener('click', () => this.generateActiveSignal('mixer'));
     this.btnDownloadMixCsv.addEventListener('click', () => this.downloadCurrentCsv());
-    this.btnSaveMixToArduino.addEventListener('click', () => this.uploadSignalToDevice());
+    this.btnSaveMixToArduino.addEventListener('click', () => {
+      const name = this.nameMix ? this.nameMix.value : null;
+      this.uploadSignalToDevice(name);
+    });
 
     // File Drag & Drop & Upload
     this.dropZone.addEventListener('click', () => this.fileInput.click());
@@ -323,10 +336,16 @@ class App {
     }
 
     this.btnDownloadFileCsv.addEventListener('click', () => this.downloadCurrentCsv());
-    this.btnSaveFileToArduino.addEventListener('click', () => this.uploadSignalToDevice());
+    this.btnSaveFileToArduino.addEventListener('click', () => {
+      const name = this.nameFile ? this.nameFile.value : null;
+      this.uploadSignalToDevice(name);
+    });
 
     // Flash Storage Tab Controls
-    this.btnUpload.addEventListener('click', () => this.uploadSignalToDevice());
+    this.btnUpload.addEventListener('click', () => {
+      const name = this.uploadFilename ? this.uploadFilename.value : null;
+      this.uploadSignalToDevice(name);
+    });
     this.btnRefreshFiles.addEventListener('click', () => this.requestFileList());
     this.btnPlay.addEventListener('click', () => this.playSelectedFile());
     this.btnStop.addEventListener('click', () => this.stopPlayback());
@@ -570,7 +589,11 @@ class App {
     this.statDuration.textContent = '0.00s';
     this.statFs.textContent = '250 Hz';
     this.statVpp.textContent = '0.00 V';
-    this.uploadFilename.value = '';
+    if (this.uploadFilename) this.uploadFilename.value = '';
+    if (this.nameBasic) this.nameBasic.value = 'BASIC_01.CSV';
+    if (this.nameBiomed) this.nameBiomed.value = 'BIOMED_01.CSV';
+    if (this.nameMix) this.nameMix.value = 'MIX_01.CSV';
+    if (this.nameFile) this.nameFile.value = 'FILE_01.CSV';
     this.updateRecordButtonsState();
   }
 
@@ -586,11 +609,17 @@ class App {
 
     const min = Math.min(...signalData.samples);
     const max = Math.max(...signalData.samples);
-    const vpp = (((max - min) / 4095.0) * 5.0).toFixed(2);
+    const vpp = (((max - min) / 4095.0) * 3.3).toFixed(2);
     this.statVpp.textContent = `${vpp} V`;
 
-    // Preset flash filename
-    this.uploadFilename.value = `${signalData.name.substring(0, 12)}.CSV`;
+    // Preset flash filename across all tabs
+    const cleanBaseName = signalData.name.replace(/[^A-Za-z0-9_]/g, '_').substring(0, 12).toUpperCase();
+    const defaultCsv = `${cleanBaseName}.CSV`;
+    if (this.uploadFilename) this.uploadFilename.value = defaultCsv;
+    if (this.nameBasic) this.nameBasic.value = defaultCsv;
+    if (this.nameBiomed) this.nameBiomed.value = defaultCsv;
+    if (this.nameMix) this.nameMix.value = defaultCsv;
+    if (this.nameFile) this.nameFile.value = defaultCsv;
     this.updateRecordButtonsState();
   }
 
@@ -733,7 +762,7 @@ class App {
   // ==========================================================================
   // FLASH TRANSFER WITH STRICT SAMPLE CAPACITY CHECK
   // ==========================================================================
-  async uploadSignalToDevice() {
+  async uploadSignalToDevice(customFilename = null) {
     if (!this.currentSignal) {
       alert('Primero debes generar o cargar una señal antes de grabar en Arduino.');
       return;
@@ -755,16 +784,34 @@ class App {
       return;
     }
 
-    let filename = this.uploadFilename.value.trim();
-    if (!filename) {
-      filename = `${this.currentSignal.name.substring(0, 12)}.CSV`;
+    let rawName = (customFilename || (this.uploadFilename ? this.uploadFilename.value : '') || '').trim();
+    if (!rawName) {
+      rawName = this.currentSignal.name;
     }
+    // Clean filename: alphanumeric and underscore only, uppercase, ends with .CSV, max 16 chars
+    let clean = rawName.toUpperCase().replace(/[^A-Z0-9_.]/g, '_');
+    if (clean.endsWith('.CSV')) {
+      clean = clean.slice(0, -4);
+    }
+    clean = clean.replace(/\./g, '_');
+    if (clean.length > 12) {
+      clean = clean.substring(0, 12);
+    }
+    if (!clean) clean = 'SIGNAL_01';
+    const filename = `${clean}.CSV`;
+
+    // Sync all filename input fields with the resolved filename
+    if (this.uploadFilename) this.uploadFilename.value = filename;
+    if (this.nameBasic) this.nameBasic.value = filename;
+    if (this.nameBiomed) this.nameBiomed.value = filename;
+    if (this.nameMix) this.nameMix.value = filename;
+    if (this.nameFile) this.nameFile.value = filename;
 
     const packets = Protocol.createUploadPackets(
       filename,
       this.currentSignal.samplingRate,
       this.currentSignal.samples,
-      16 // 16 samples per line fits comfortably within serial & BLE line buffers
+      10 // 10 samples per packet fits reliably within single BLE MTU and Serial buffers (<55 bytes)
     );
 
     this.isUploading = true;

@@ -555,18 +555,18 @@ export class SignalGenerator {
   // ==========================================================================
 
   /**
-   * Clamps voltage (0.0V - 5.0V) and maps to 12-bit DAC value (0 - 4095)
+   * Clamps voltage (0.0V - 3.3V) and maps to 12-bit DAC value (0 - 4095)
    */
   static voltageToDac(voltage) {
-    const clamped = Math.max(0.0, Math.min(5.0, voltage));
-    return Math.round((clamped / 5.0) * 4095.0);
+    const clamped = Math.max(0.0, Math.min(3.3, voltage));
+    return Math.round((clamped / 3.3) * 4095.0);
   }
 
   /**
-   * Converts 12-bit DAC value to approximate output voltage
+   * Converts 12-bit DAC value to approximate output voltage (0.0V - 3.3V)
    */
   static dacToVoltage(dac) {
-    return (dac / 4095.0) * 5.0;
+    return (dac / 4095.0) * 3.3;
   }
 
   /**
