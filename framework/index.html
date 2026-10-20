@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cayetino R4 - Estación Biomédica DAC 12-bit & Keypad A2</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20width=%2232%22%20height=%2232%22><text y=%2224%22 font-size=%2224%22>⚡</text></svg>">
+  <script>
+    // Limpieza automática de Service Workers residuales de proyectos anteriores (ej. Pyodide/PWA)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for (let registration of registrations) {
+          registration.unregister();
+        }
+      });
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <h1>CAYETINO R4</h1>
+        <p>Generador y Reproductor de Señales Biomédicas (DAC Pin A0 | Keypad Pin A2)</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="status-pill">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Desconectado</span>
+      </div>
+
+      <button id="btnConnectSerial" class="btn btn-serial" title="Conectar mediante cable USB">
+        🔌 Web Serial
+      </button>
+      <button id="btnConnectBle" class="btn btn-ble" title="Conectar inalámbricamente mediante Bluetooth">
+        📶 Web Bluetooth
+      </button>
+      <button id="btnDisconnect" class="btn btn-outline" disabled>
+        Desconectar
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main class="dashboard-grid">
+
+    <!-- Left Column: Signal Creation & Files -->
+    <aside>
+      
+      <!-- Generator Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🔬 Origen de Señal</div>
+        </div>
+
+        <div class="tabs">
+          <button id="tabGenerate" class="tab-btn active">Generador</button>
+          <button id="tabUpload" class="tab-btn">Subir Archivo</button>
+        </div>
+
+        <!-- Panel 1: Synthetic & Biomedical Generator -->
+        <div id="panelGenerate">
+          <div class="form-group">
+            <label class="form-label" for="signalType">Tipo de Señal</label>
+            <select id="signalType" class="form-select">
+              <option value="ecg">ECG Derivación II (Normal Sinusal)</option>
+              <option value="emg">EMG Superficial (Ráfagas Musculares)</option>
+              <option value="sine">Onda Senoidal Pura (1 Hz Calibración)</option>
+              <option value="triangle">Onda Triangular (2 Hz Calibración)</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="samplingRate">Frecuencia (Fs)</label>
+              <select id="samplingRate" class="form-select">
+                <option value="125">125 Hz</option>
+                <option value="250" selected>250 Hz (Estándar)</option>
+                <option value="500">500 Hz (Alta resolución)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="duration">Duración (seg)</label>
+              <input type="number" id="duration" class="form-control" value="4.0" step="0.5" min="1" max="10">
+            </div>
+          </div>
+
+          <div class="form-group" id="hrGroup">
+            <label class="form-label" for="heartRate">Frecuencia Cardíaca (BPM)</label>
+            <input type="number" id="heartRate" class="form-control" value="72" min="40" max="180">
+          </div>
+
+          <div style="display:flex; gap:0.5rem; margin-top:0.9rem;">
+            <button id="btnGenerate" class="btn btn-primary" style="flex:1;">
+              ⚡ Generar Señal
+            </button>
+            <button id="btnDownloadCsv" class="btn btn-outline" title="Descargar señal actual en formato CSV">
+              💾 CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Panel 2: File Upload / Drag & Drop -->
+        <div id="panelUpload" style="display: none;">
+          <div class="form-group">
+            <label class="form-label">Muestras Pre-generadas (NeuroKit2)</label>
+            <select id="sampleFiles" class="form-select">
+              <option value="">-- Cargar archivo de muestra --</option>
+              <option value="ECG_NORMAL_72BPM.csv">ECG Normal 72 BPM (NeuroKit2)</option>
+              <option value="ECG_ARRHYTHMIA.csv">ECG Arritmia Ventricular (NeuroKit2)</option>
+              <option value="EMG_CONTRACTION.csv">EMG Contracción Muscular (NeuroKit2)</option>
+              <option value="CAL_SINE_1HZ.csv">Seno 1 Hz (Calibración)</option>
+              <option value="CAL_TRIANGLE_2HZ.csv">Triángulo 2 Hz (Calibración)</option>
+            </select>
+          </div>
+
+          <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-icon">📁</div>
+            <p><strong>Arrastra un archivo .CSV o .TXT aquí</strong></p>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">
+              O haz clic para seleccionar desde tu computadora
+            </p>
+            <input type="file" id="fileInput" accept=".csv,.txt" style="display:none;">
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Hardware Pinout Summary Notice -->
+      <div class="notice-box">
+        <h4>🛠️ Configuración de Pines Clave</h4>
+        <p><strong>• Pin A0:</strong> Salida del DAC de 12 bits (0-4095, 0-5V). Libre de cargas resistivas.</p>
+        <p><strong>• Pin A2:</strong> Lectura analógica de botones del LCD Keypad Shield (modificado a A2).</p>
+        <p><strong>• Pines D4-D9:</strong> Bus de control y datos del LCD 16x2.</p>
+      </div>
+
+    </aside>
+
+    <!-- Right Column: Visualizer, Device Storage & Playback -->
+    <section>
+
+      <!-- Oscilloscope Visualizer Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📈 Osciloscopio Web (Vista Previa DAC 12-bit)</div>
+        </div>
+
+        <div class="viewer-container">
+          <canvas id="waveformCanvas"></canvas>
+        </div>
+
+        <div class="viewer-stats">
+          <div class="stat-item">Señal: <span id="statName">--</span></div>
+          <div class="stat-item">Muestras: <span id="statSamples">0</span></div>
+          <div class="stat-item">Duración: <span id="statDuration">0.00s</span></div>
+          <div class="stat-item">Fs: <span id="statFs">250 Hz</span></div>
+          <div class="stat-item">Vpp Estimado: <span id="statVpp">0.00 V</span></div>
+        </div>
+      </div>
+
+      <!-- Storage & Transfer Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">💾 Memoria Flash del Arduino Uno R4</div>
+          <button id="btnRefreshFiles" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.75rem;" disabled>
+            🔄 Actualizar Lista
+          </button>
+        </div>
+
+        <div class="form-row" style="align-items:flex-end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="uploadFilename">Nombre de Archivo en Arduino</label>
+            <input type="text" id="uploadFilename" class="form-control" value="CUSTOM_01.CSV" maxlength="16">
+          </div>
+          <button id="btnUpload" class="btn btn-primary" disabled style="height:35px;">
+            📤 Enviar a Flash
+          </button>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-bar-container" id="uploadProgressContainer">
+          <div class="progress-bar-fill" id="uploadProgressBar"></div>
+        </div>
+
+        <!-- Stored Files Table -->
+        <div class="table-container">
+          <table class="file-table">
+            <thead>
+              <tr>
+                <th>Archivo</th>
+                <th>Almacenamiento</th>
+                <th>Muestras / Fs</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="fileTableBody">
+              <tr>
+                <td colspan="4" style="text-align:center; color:#64748b;">
+                  Conéctate al Arduino para ver los archivos disponibles
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Playback Controls Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🎛️ Control de Salida DAC (Pin A0)</div>
+          <div id="nowPlayingLabel" style="font-size:0.8rem; font-weight:600; color:var(--text-muted);">
+            ⏹ En espera
+          </div>
+        </div>
+
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem;">
+          <div style="display:flex; gap:0.6rem;">
+            <button id="btnPlay" class="btn btn-success" disabled style="padding:0.6rem 1.4rem; font-size:0.95rem;">
+              ▶ Reproducir (Play)
+            </button>
+            <button id="btnStop" class="btn btn-danger" disabled style="padding:0.6rem 1.4rem; font-size:0.95rem;">
+              ⏹ Detener (Stop)
+            </button>
+          </div>
+
+          <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; cursor:pointer;">
+            <input type="checkbox" id="chkLoop" checked>
+            <span>Reproducción en Bucle Infinito</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Console / Terminal Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title" style="font-size:0.8rem;">📟 Registro de Comunicación Serial / BLE</div>
+          <button id="btnClearLogs" class="btn btn-outline" style="padding:0.15rem 0.4rem; font-size:0.7rem;">
+            Limpiar
+          </button>
+        </div>
+        <div class="terminal-window" id="terminalOutput"></div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ES6 Modules Entry Point -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

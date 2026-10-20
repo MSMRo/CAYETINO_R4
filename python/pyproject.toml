@@ -1,0 +1,16 @@
+[project]
+name = "cayetino-r4-signals"
+version = "1.0.0"
+description = "Biomedical signal generator using NeuroKit2 for Arduino Uno R4 WiFi 12-bit DAC"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "neurokit2>=0.2.10",
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "matplotlib>=3.8.0",
+    "pandas>=2.2.0"
+]
+
+[tool.uv]
+package = false
