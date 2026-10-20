@@ -466,23 +466,46 @@ export class SignalGenerator {
   }
 
   /**
-   * Sums, multiplies, or modulates two signal components
+   * Generates a small preview buffer (e.g. 100 points) to draw live mini-oscilloscopes
+   */
+  static generateMiniPreview(type, freq = 1.0, amp = 2.0, phase = 0, numPoints = 120) {
+    const points = new Float32Array(numPoints);
+    const displayPeriods = (type.startsWith('noise') || type === 'wander' || type === 'gaussian') ? 1.0 : 2.0;
+    const timeSpan = freq > 0 ? (displayPeriods / freq) : 2.0;
+
+    for (let i = 0; i < numPoints; i++) {
+      const t = (i / (numPoints - 1)) * timeSpan;
+      points[i] = SignalGenerator.evaluateComponent(type, t, freq, phase);
+    }
+    return points;
+  }
+
+  /**
+   * Combines 2 or 3 signal components (Sum, Multiply/Modulate, Subtract)
    */
   static mixSignals({
     duration = 4.0,
     samplingRate = 250,
+    numComponents = 2,
     // Component A
     typeA = 'sine',
     freqA = 1.0,
-    ampA = 2.0, // in Volts
+    ampA = 2.0,
     phaseA = 0,
+    // Op 1
+    op1 = 'add', // 'add', 'multiply', 'subtract'
     // Component B
     typeB = 'sine',
     freqB = 5.0,
-    ampB = 1.0, // in Volts
+    ampB = 1.0,
     phaseB = 0,
-    // Combination Operator
-    operation = 'add', // 'add', 'multiply', 'subtract'
+    // Op 2 (if 3 components)
+    op2 = 'add',
+    // Component C (if 3 components)
+    typeC = 'noise_60hz',
+    freqC = 60.0,
+    ampC = 0.5,
+    phaseC = 0,
     // Master Output Controls
     masterGain = 1.0,
     masterOffset = 2.5
@@ -490,21 +513,22 @@ export class SignalGenerator {
     const totalSamples = Math.floor(duration * samplingRate);
     const samples = new Uint16Array(totalSamples);
 
+    const applyOp = (val1, val2, op) => {
+      if (op === 'multiply') return (val1 * val2) / 2.0;
+      if (op === 'subtract') return val1 - val2;
+      return val1 + val2;
+    };
+
     for (let i = 0; i < totalSamples; i++) {
       const t = i / samplingRate;
       const valA = (ampA / 2.0) * SignalGenerator.evaluateComponent(typeA, t, freqA, phaseA);
       const valB = (ampB / 2.0) * SignalGenerator.evaluateComponent(typeB, t, freqB, phaseB);
 
-      let combined = 0.0;
-      if (operation === 'add') {
-        combined = valA + valB;
-      } else if (operation === 'subtract') {
-        combined = valA - valB;
-      } else if (operation === 'multiply') {
-        // Amplitude modulation
-        combined = (valA * valB) / 2.0;
-      } else {
-        combined = valA + valB;
+      let combined = applyOp(valA, valB, op1);
+
+      if (numComponents === 3) {
+        const valC = (ampC / 2.0) * SignalGenerator.evaluateComponent(typeC, t, freqC, phaseC);
+        combined = applyOp(combined, valC, op2);
       }
 
       // Apply master gain and offset
@@ -512,11 +536,14 @@ export class SignalGenerator {
       samples[i] = SignalGenerator.voltageToDac(v);
     }
 
-    const opSymbol = operation === 'add' ? 'PLUS' : operation === 'multiply' ? 'MOD' : 'SUB';
-    const name = `MIX_${typeA.toUpperCase().substring(0, 4)}_${opSymbol}_${typeB.toUpperCase().substring(0, 4)}`;
+    const opSymbol = op1 === 'add' ? 'PLUS' : op1 === 'multiply' ? 'MOD' : 'SUB';
+    let name = `MIX_${typeA.toUpperCase().substring(0, 3)}_${opSymbol}_${typeB.toUpperCase().substring(0, 3)}`;
+    if (numComponents === 3) {
+      name += `_${typeC.toUpperCase().substring(0, 3)}`;
+    }
 
     return {
-      name,
+      name: name.substring(0, 16),
       samplingRate,
       samples: Array.from(samples),
       duration

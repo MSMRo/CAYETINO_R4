@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20width=%2232%22%20height=%2232%22><text y=%2224%22 font-size=%2224%22>⚡</text></svg>">
   <script>
-    // Limpieza de service workers residuales
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(function(regs) {
         for (let r of regs) r.unregister();
@@ -168,8 +167,8 @@
               <option value="125">125 Hz</option>
               <option value="200">200 Hz</option>
               <option value="250" selected>250 Hz (Estándar)</option>
-              <option value="500">500 Hz (Alta resolución)</option>
-              <option value="1000">1000 Hz (Máxima)</option>
+              <option value="500">500 Hz</option>
+              <option value="1000">1000 Hz</option>
             </select>
           </div>
           <div class="form-group">
@@ -178,12 +177,16 @@
           </div>
         </div>
 
-        <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
+        <!-- Action Buttons -->
+        <div class="card-action-bar">
           <button id="btnGenerateBasic" class="btn btn-primary" style="flex:1;">
             ⚡ Generar Básica
           </button>
-          <button id="btnDownloadBasicCsv" class="btn btn-outline" title="Descargar señal en CSV">
+          <button id="btnDownloadBasicCsv" class="btn btn-outline" disabled title="Descargar señal en CSV">
             💾 CSV
+          </button>
+          <button id="btnSaveBasicToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
+            📤 Grabar en Arduino
           </button>
         </div>
       </div>
@@ -253,7 +256,7 @@
               <option value="125">125 Hz</option>
               <option value="200">200 Hz</option>
               <option value="250" selected>250 Hz (Estándar)</option>
-              <option value="500">500 Hz (Alta resolución)</option>
+              <option value="500">500 Hz</option>
               <option value="1000">1000 Hz</option>
             </select>
           </div>
@@ -263,31 +266,41 @@
           </div>
         </div>
 
-        <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
+        <!-- Action Buttons -->
+        <div class="card-action-bar">
           <button id="btnGenerateBiomed" class="btn btn-primary" style="flex:1;">
             ⚡ Generar Biomédica
           </button>
-          <button id="btnDownloadBiomedCsv" class="btn btn-outline" title="Descargar señal en CSV">
+          <button id="btnDownloadBiomedCsv" class="btn btn-outline" disabled title="Descargar señal en CSV">
             💾 CSV
+          </button>
+          <button id="btnSaveBiomedToArduino" class="btn btn-flash-save" disabled title="Grabar señal en la memoria Flash del Arduino">
+            📤 Grabar en Arduino
           </button>
         </div>
       </div>
 
-      <!-- PANEL 3: SUMADOR / MEZCLADOR DE SEÑALES (INSPIRED BY CAYETINO 2) -->
+      <!-- PANEL 3: SUMADOR / MEZCLADOR DE SEÑALES (2 Ó 3 COMPONENTES) -->
       <div class="card tab-panel" id="panelMixer" style="display:none;">
         <div class="card-header">
           <div class="card-title">🎛️ Sumador & Mezclador de Señales</div>
+          <!-- Selector de cantidad de componentes -->
+          <div style="display:flex; gap:0.25rem;">
+            <button id="btnMixMode2" class="op-btn active" style="font-size:0.75rem;">2 Comp</button>
+            <button id="btnMixMode3" class="op-btn" style="font-size:0.75rem;">3 Comp</button>
+          </div>
         </div>
 
-        <!-- Componente 1 -->
+        <!-- COMPONENTE 1 -->
         <div class="sub-panel">
           <div class="sub-panel-title">
-            <span>Componente 1 (Señal Primaria)</span>
+            <span>Componente 1 (Señal Base)</span>
+            <span style="font-size:0.75rem; color:var(--cyan-accent); font-weight:700;">CH 1</span>
           </div>
           <div class="form-group">
-            <label class="form-label">Tipo de Forma de Onda</label>
+            <label class="form-label">Forma de Onda</label>
             <select id="mixTypeA" class="form-select">
-              <option value="sine" selected>Senoidal</option>
+              <option value="sine" selected>Senoidal Pura</option>
               <option value="square">Cuadrada</option>
               <option value="triangle">Triangular</option>
               <option value="sawtooth">Diente de Sierra</option>
@@ -306,30 +319,35 @@
               <input type="number" id="mixAmpA" class="form-control" value="2.0" min="0.1" max="4.0" step="0.1">
             </div>
           </div>
+          <!-- Mini preview Component 1 -->
+          <div class="mini-canvas-container">
+            <canvas id="canvasPreviewComp1" class="mini-canvas"></canvas>
+          </div>
         </div>
 
-        <!-- Operación de Combinación -->
+        <!-- OPERADOR 1 -->
         <div class="operator-selector">
-          <button class="op-btn active" id="opAdd" data-op="add">➕ Sumar (A + B)</button>
-          <button class="op-btn" id="opMul" data-op="multiply">✖️ Modular (A × B)</button>
-          <button class="op-btn" id="opSub" data-op="subtract">➖ Restar (A - B)</button>
+          <button class="op-btn active" data-op1="add">➕ Sumar (A + B)</button>
+          <button class="op-btn" data-op1="multiply">✖️ Modular (A × B)</button>
+          <button class="op-btn" data-op1="subtract">➖ Restar (A - B)</button>
         </div>
 
-        <!-- Componente 2 -->
+        <!-- COMPONENTE 2 -->
         <div class="sub-panel">
           <div class="sub-panel-title">
-            <span>Componente 2 (Secundaria / Interferencia)</span>
+            <span>Componente 2 (Secundaria / Moduladora)</span>
+            <span style="font-size:0.75rem; color:#10b981; font-weight:700;">CH 2</span>
           </div>
           <div class="form-group">
-            <label class="form-label">Tipo de Forma de Onda</label>
+            <label class="form-label">Forma de Onda</label>
             <select id="mixTypeB" class="form-select">
-              <option value="sine">Senoidal (Harmónico / Batido)</option>
+              <option value="sine">Senoidal (Batido / Armónico)</option>
               <option value="square">Cuadrada</option>
               <option value="triangle">Triangular</option>
-              <option value="noise_60hz" selected>Ruido de Red Eléctrica (60 Hz)</option>
-              <option value="noise_50hz">Ruido de Red Eléctrica (50 Hz)</option>
-              <option value="wander">Deriva de Línea Base (Respiración 0.25 Hz)</option>
-              <option value="gaussian">Ruido Blanco Térmico</option>
+              <option value="noise_60hz" selected>Ruido Red 60 Hz (Powerline)</option>
+              <option value="noise_50hz">Ruido Red 50 Hz</option>
+              <option value="wander">Deriva de Línea Base (0.25 Hz)</option>
+              <option value="gaussian">Ruido Blanco Gaussiano</option>
             </select>
           </div>
           <div class="form-row">
@@ -341,6 +359,50 @@
               <label class="form-label">Amplitud (V)</label>
               <input type="number" id="mixAmpB" class="form-control" value="0.6" min="0.0" max="4.0" step="0.1">
             </div>
+          </div>
+          <!-- Mini preview Component 2 -->
+          <div class="mini-canvas-container">
+            <canvas id="canvasPreviewComp2" class="mini-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- OPERADOR 2 (Para modo 3 componentes) -->
+        <div id="wrapOp2" class="operator-selector" style="display:none;">
+          <button class="op-btn active" data-op2="add">➕ Sumar (+ C)</button>
+          <button class="op-btn" data-op2="multiply">✖️ Modular (× C)</button>
+          <button class="op-btn" data-op2="subtract">➖ Restar (- C)</button>
+        </div>
+
+        <!-- COMPONENTE 3 (Opcional) -->
+        <div id="wrapComp3" class="sub-panel" style="display:none;">
+          <div class="sub-panel-title">
+            <span>Componente 3 (Tercer Elemento)</span>
+            <span style="font-size:0.75rem; color:#f59e0b; font-weight:700;">CH 3</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Forma de Onda</label>
+            <select id="mixTypeC" class="form-select">
+              <option value="sine">Senoidal</option>
+              <option value="wander" selected>Deriva de Línea Base (0.25 Hz)</option>
+              <option value="noise_60hz">Ruido 60 Hz</option>
+              <option value="gaussian">Ruido Blanco</option>
+              <option value="square">Cuadrada</option>
+              <option value="triangle">Triangular</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Freq (Hz)</label>
+              <input type="number" id="mixFreqC" class="form-control" value="0.25" min="0.1" max="100" step="0.05">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Amplitud (V)</label>
+              <input type="number" id="mixAmpC" class="form-control" value="0.4" min="0.0" max="4.0" step="0.1">
+            </div>
+          </div>
+          <!-- Mini preview Component 3 -->
+          <div class="mini-canvas-container">
+            <canvas id="canvasPreviewComp3" class="mini-canvas"></canvas>
           </div>
         </div>
 
@@ -376,12 +438,16 @@
           </div>
         </div>
 
-        <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
+        <!-- Action Buttons -->
+        <div class="card-action-bar">
           <button id="btnGenerateMix" class="btn btn-primary" style="flex:1;">
-            ⚡ Generar y Previsualizar Mezcla
+            ⚡ Generar Mezcla
           </button>
-          <button id="btnDownloadMixCsv" class="btn btn-outline" title="Descargar mezcla en CSV">
+          <button id="btnDownloadMixCsv" class="btn btn-outline" disabled title="Descargar mezcla en CSV">
             💾 CSV
+          </button>
+          <button id="btnSaveMixToArduino" class="btn btn-flash-save" disabled title="Grabar mezcla en memoria Flash del Arduino">
+            📤 Grabar en Arduino
           </button>
         </div>
       </div>
@@ -411,6 +477,16 @@
             O pulsa para seleccionar desde tu dispositivo
           </p>
           <input type="file" id="fileInput" accept=".csv,.txt" style="display:none;">
+        </div>
+
+        <!-- Action Buttons for Files Tab -->
+        <div class="card-action-bar" style="margin-top:1rem;">
+          <button id="btnDownloadFileCsv" class="btn btn-outline" disabled style="flex:1;">
+            💾 Descargar CSV
+          </button>
+          <button id="btnSaveFileToArduino" class="btn btn-flash-save" disabled style="flex:1;">
+            📤 Grabar en Arduino
+          </button>
         </div>
       </div>
 

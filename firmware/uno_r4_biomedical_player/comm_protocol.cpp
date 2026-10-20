@@ -75,7 +75,9 @@ void CommProtocol::handleWrite(const char* args, Print& out) {
   if (_storage.startWrite(filename, fs, count)) {
     out.println("OK READY");
   } else {
-    out.println("ERR WRITE CAPACITY EXCEEDED");
+    out.print("ERR WRITE CAPACITY EXCEEDED (MAX ");
+    out.print(MAX_CUSTOM_SAMPLES);
+    out.println(" SAMPLES)");
   }
 }
 
@@ -88,11 +90,16 @@ void CommProtocol::handleData(const char* args, Print& out) {
     return;
   }
 
-  // Parse comma separated values
+  // Parse comma separated values into local array
   uint16_t samples[32];
   uint16_t sampleCount = 0;
 
-  char* token = strtok(endptr, " ,\t\r\n");
+  // Make a local copy to ensure safe strtok mutation
+  char localBuf[220];
+  strncpy(localBuf, endptr, sizeof(localBuf) - 1);
+  localBuf[sizeof(localBuf) - 1] = '\0';
+
+  char* token = strtok(localBuf, " ,\t\r\n");
   while (token != nullptr && sampleCount < 32) {
     int val = atoi(token);
     samples[sampleCount++] = (uint16_t)constrain(val, 0, 4095);

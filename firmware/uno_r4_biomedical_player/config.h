@@ -38,8 +38,8 @@
 #define KEYPAD_THRESHOLD_SELECT  800
 
 // --- SYSTEM LIMITS ---
-#define MAX_CUSTOM_FILES         3
-#define MAX_CUSTOM_SAMPLES       1200   // 1200 samples @ 250 Hz = 4.8 seconds
+#define MAX_CUSTOM_FILES         2
+#define MAX_CUSTOM_SAMPLES       2500   // 2500 samples @ 250 Hz = 10.0 seconds (5.0s @ 500 Hz)
 #define SERIAL_BAUD_RATE         115200
 
 // BLE configuration (Nordic UART Service)

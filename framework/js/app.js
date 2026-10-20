@@ -1,7 +1,8 @@
 /**
  * Cayetino R4 - Main Application Controller
  * High-performance, responsive controller supporting Web Serial, Web BLE,
- * interactive biomedical synthesis, multi-component signal mixer, and flash transfer.
+ * interactive biomedical synthesis, multi-component signal mixer with live
+ * sub-wave previews, and direct flash transfer across all tabs.
  */
 
 import { WaveformRenderer } from './chart_renderer.js';
@@ -22,12 +23,19 @@ class App {
     this.selectedFile = null;
     this.isPlaying = false;
     this.isUploading = false;
-    this.mixOperation = 'add'; // 'add', 'multiply', 'subtract'
+
+    // Mixer state
+    this.numMixComponents = 2; // 2 or 3
+    this.mixOp1 = 'add'; // 'add', 'multiply', 'subtract'
+    this.mixOp2 = 'add';
 
     this.bindDomElements();
     this.attachEventListeners();
     this.setupSliderSync();
+
+    // Initial clean standby state (no auto-generated stretching signal)
     this.resetStatsDisplay();
+    this.updateAllMiniPreviews();
   }
 
   bindDomElements() {
@@ -77,6 +85,7 @@ class App {
     this.basicDuration = document.getElementById('basicDuration');
     this.btnGenerateBasic = document.getElementById('btnGenerateBasic');
     this.btnDownloadBasicCsv = document.getElementById('btnDownloadBasicCsv');
+    this.btnSaveBasicToArduino = document.getElementById('btnSaveBasicToArduino');
 
     // Tab 2: Biomed
     this.biomedType = document.getElementById('biomedType');
@@ -95,26 +104,44 @@ class App {
     this.biomedDuration = document.getElementById('biomedDuration');
     this.btnGenerateBiomed = document.getElementById('btnGenerateBiomed');
     this.btnDownloadBiomedCsv = document.getElementById('btnDownloadBiomedCsv');
+    this.btnSaveBiomedToArduino = document.getElementById('btnSaveBiomedToArduino');
 
     // Tab 3: Mixer
+    this.btnMixMode2 = document.getElementById('btnMixMode2');
+    this.btnMixMode3 = document.getElementById('btnMixMode3');
     this.mixTypeA = document.getElementById('mixTypeA');
     this.mixFreqA = document.getElementById('mixFreqA');
     this.mixAmpA = document.getElementById('mixAmpA');
-    this.opButtons = document.querySelectorAll('.op-btn');
+    this.canvasComp1 = document.getElementById('canvasPreviewComp1');
+
+    this.op1Buttons = document.querySelectorAll('[data-op1]');
     this.mixTypeB = document.getElementById('mixTypeB');
     this.mixFreqB = document.getElementById('mixFreqB');
     this.mixAmpB = document.getElementById('mixAmpB');
+    this.canvasComp2 = document.getElementById('canvasPreviewComp2');
+
+    this.wrapOp2 = document.getElementById('wrapOp2');
+    this.op2Buttons = document.querySelectorAll('[data-op2]');
+    this.wrapComp3 = document.getElementById('wrapComp3');
+    this.mixTypeC = document.getElementById('mixTypeC');
+    this.mixFreqC = document.getElementById('mixFreqC');
+    this.mixAmpC = document.getElementById('mixAmpC');
+    this.canvasComp3 = document.getElementById('canvasPreviewComp3');
+
     this.mixMasterGain = document.getElementById('mixMasterGain');
     this.mixMasterOffset = document.getElementById('mixMasterOffset');
     this.mixFs = document.getElementById('mixFs');
     this.mixDuration = document.getElementById('mixDuration');
     this.btnGenerateMix = document.getElementById('btnGenerateMix');
     this.btnDownloadMixCsv = document.getElementById('btnDownloadMixCsv');
+    this.btnSaveMixToArduino = document.getElementById('btnSaveMixToArduino');
 
     // Tab 4: Files
     this.sampleFiles = document.getElementById('sampleFiles');
     this.dropZone = document.getElementById('dropZone');
     this.fileInput = document.getElementById('fileInput');
+    this.btnDownloadFileCsv = document.getElementById('btnDownloadFileCsv');
+    this.btnSaveFileToArduino = document.getElementById('btnSaveFileToArduino');
 
     // Tab 5: Flash Storage
     this.uploadFilename = document.getElementById('uploadFilename');
@@ -165,7 +192,7 @@ class App {
   }
 
   attachEventListeners() {
-    // Connection
+    // Connection Buttons
     this.btnSerial.addEventListener('click', () => this.connectSerial());
     this.btnBle.addEventListener('click', () => this.connectBle());
     this.btnDisconnect.addEventListener('click', () => this.disconnect());
@@ -184,12 +211,16 @@ class App {
       });
     });
 
-    // Waveform Types Toggle
+    // Basic Controls
     this.basicWaveType.addEventListener('change', () => {
       this.grpDutyCycle.style.display = (this.basicWaveType.value === 'square') ? 'block' : 'none';
-      this.generateActiveSignal('basic');
     });
 
+    this.btnGenerateBasic.addEventListener('click', () => this.generateActiveSignal('basic'));
+    this.btnDownloadBasicCsv.addEventListener('click', () => this.downloadCurrentCsv());
+    this.btnSaveBasicToArduino.addEventListener('click', () => this.uploadSignalToDevice());
+
+    // Biomed Controls
     this.biomedType.addEventListener('change', () => {
       const type = this.biomedType.value;
       if (type.startsWith('eeg')) {
@@ -204,30 +235,66 @@ class App {
           this.lblBiomedBpm.textContent = `${this.biomedBpm.value} BPM`;
         }
       }
-      this.generateActiveSignal('biomed');
     });
-
-    // Mixer Operations (Add, Multiply, Subtract)
-    this.opButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        this.opButtons.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this.mixOperation = btn.getAttribute('data-op');
-        this.generateActiveSignal('mixer');
-      });
-    });
-
-    // Generation buttons
-    this.btnGenerateBasic.addEventListener('click', () => this.generateActiveSignal('basic'));
-    this.btnDownloadBasicCsv.addEventListener('click', () => this.downloadCurrentCsv());
 
     this.btnGenerateBiomed.addEventListener('click', () => this.generateActiveSignal('biomed'));
     this.btnDownloadBiomedCsv.addEventListener('click', () => this.downloadCurrentCsv());
+    this.btnSaveBiomedToArduino.addEventListener('click', () => this.uploadSignalToDevice());
+
+    // Mixer Component Count Toggle (2 or 3 components)
+    this.btnMixMode2.addEventListener('click', () => {
+      this.numMixComponents = 2;
+      this.btnMixMode2.classList.add('active');
+      this.btnMixMode3.classList.remove('active');
+      this.wrapOp2.style.display = 'none';
+      this.wrapComp3.style.display = 'none';
+    });
+
+    this.btnMixMode3.addEventListener('click', () => {
+      this.numMixComponents = 3;
+      this.btnMixMode3.classList.add('active');
+      this.btnMixMode2.classList.remove('active');
+      this.wrapOp2.style.display = 'flex';
+      this.wrapComp3.style.display = 'block';
+      this.updateMiniPreview(3);
+    });
+
+    // Mixer Operator 1 buttons
+    this.op1Buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.op1Buttons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.mixOp1 = btn.getAttribute('data-op1');
+      });
+    });
+
+    // Mixer Operator 2 buttons
+    this.op2Buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.op2Buttons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.mixOp2 = btn.getAttribute('data-op2');
+      });
+    });
+
+    // Live update for mini-canvases when changing mixer parameters
+    [this.mixTypeA, this.mixFreqA, this.mixAmpA].forEach(el => {
+      el.addEventListener('input', () => this.updateMiniPreview(1));
+    });
+
+    [this.mixTypeB, this.mixFreqB, this.mixAmpB].forEach(el => {
+      el.addEventListener('input', () => this.updateMiniPreview(2));
+    });
+
+    [this.mixTypeC, this.mixFreqC, this.mixAmpC].forEach(el => {
+      el.addEventListener('input', () => this.updateMiniPreview(3));
+    });
 
     this.btnGenerateMix.addEventListener('click', () => this.generateActiveSignal('mixer'));
     this.btnDownloadMixCsv.addEventListener('click', () => this.downloadCurrentCsv());
+    this.btnSaveMixToArduino.addEventListener('click', () => this.uploadSignalToDevice());
 
-    // File Drag & Drop
+    // File Drag & Drop & Upload
     this.dropZone.addEventListener('click', () => this.fileInput.click());
     this.fileInput.addEventListener('change', (e) => this.handleFileSelection(e.target.files[0]));
 
@@ -248,7 +315,6 @@ class App {
       }
     });
 
-    // Sample files dropdown
     if (this.sampleFiles) {
       this.sampleFiles.addEventListener('change', () => {
         const val = this.sampleFiles.value;
@@ -256,13 +322,15 @@ class App {
       });
     }
 
-    // Flash Memory Transfer & Playback
+    this.btnDownloadFileCsv.addEventListener('click', () => this.downloadCurrentCsv());
+    this.btnSaveFileToArduino.addEventListener('click', () => this.uploadSignalToDevice());
+
+    // Flash Storage Tab Controls
     this.btnUpload.addEventListener('click', () => this.uploadSignalToDevice());
     this.btnRefreshFiles.addEventListener('click', () => this.requestFileList());
     this.btnPlay.addEventListener('click', () => this.playSelectedFile());
     this.btnStop.addEventListener('click', () => this.stopPlayback());
 
-    // Clear logs
     if (this.btnClearLogs) {
       this.btnClearLogs.addEventListener('click', () => {
         this.terminal.innerHTML = '';
@@ -286,8 +354,99 @@ class App {
         this.tabPanels[key].style.display = 'none';
       }
     });
+
+    if (targetTab === 'tabMixer') {
+      this.updateAllMiniPreviews();
+    }
   }
 
+  // ==========================================================================
+  // MINI WAVEFORM PREVIEWS FOR MIXER COMPONENTS
+  // ==========================================================================
+  updateAllMiniPreviews() {
+    this.updateMiniPreview(1);
+    this.updateMiniPreview(2);
+    this.updateMiniPreview(3);
+  }
+
+  updateMiniPreview(compNum) {
+    let canvas, type, freq, amp;
+    let color = '#38bdf8';
+
+    if (compNum === 1) {
+      canvas = this.canvasComp1;
+      type = this.mixTypeA.value;
+      freq = parseFloat(this.mixFreqA.value) || 1.0;
+      amp = parseFloat(this.mixAmpA.value) || 2.0;
+      color = '#38bdf8'; // Cyan
+    } else if (compNum === 2) {
+      canvas = this.canvasComp2;
+      type = this.mixTypeB.value;
+      freq = parseFloat(this.mixFreqB.value) || 60.0;
+      amp = parseFloat(this.mixAmpB.value) || 0.6;
+      color = '#34d399'; // Emerald
+    } else if (compNum === 3) {
+      canvas = this.canvasComp3;
+      type = this.mixTypeC.value;
+      freq = parseFloat(this.mixFreqC.value) || 0.25;
+      amp = parseFloat(this.mixAmpC.value) || 0.4;
+      color = '#fbbf24'; // Amber
+    }
+
+    if (!canvas) return;
+
+    const points = SignalGenerator.generateMiniPreview(type, freq, amp, 0, 100);
+    this.renderMiniCanvas(canvas, points, color);
+  }
+
+  renderMiniCanvas(canvas, points, strokeColor) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 280;
+    const h = canvas.clientHeight || 65;
+
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Dark background
+    ctx.fillStyle = '#080d1a';
+    ctx.fillRect(0, 0, w, h);
+
+    // Center dotted line
+    ctx.strokeStyle = '#1e293b';
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (!points || points.length === 0) return;
+
+    // Draw component waveform
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1.6;
+    ctx.shadowColor = strokeColor;
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+
+    const n = points.length;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * w;
+      // Invert Y: normalized value in [-1, 1]
+      const y = h / 2 - (points[i] * (h / 2 - 6));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // ==========================================================================
+  // SIGNAL SYNTHESIS & GENERATION
+  // ==========================================================================
   generateActiveSignal(category = 'basic') {
     let sig = null;
 
@@ -368,6 +527,10 @@ class App {
       const freqB = parseFloat(this.mixFreqB.value) || 60.0;
       const ampB = parseFloat(this.mixAmpB.value) || 0.6;
 
+      const typeC = this.mixTypeC.value;
+      const freqC = parseFloat(this.mixFreqC.value) || 0.25;
+      const ampC = parseFloat(this.mixAmpC.value) || 0.4;
+
       const masterGain = parseFloat(this.mixMasterGain.value) || 1.0;
       const masterOffset = parseFloat(this.mixMasterOffset.value) || 2.5;
       const fs = parseInt(this.mixFs.value, 10) || 250;
@@ -376,13 +539,18 @@ class App {
       sig = SignalGenerator.mixSignals({
         duration: dur,
         samplingRate: fs,
+        numComponents: this.numMixComponents,
         typeA,
         freqA,
         ampA,
+        op1: this.mixOp1,
         typeB,
         freqB,
         ampB,
-        operation: this.mixOperation,
+        op2: this.mixOp2,
+        typeC,
+        freqC,
+        ampC,
         masterGain,
         masterOffset
       });
@@ -403,10 +571,7 @@ class App {
     this.statFs.textContent = '250 Hz';
     this.statVpp.textContent = '0.00 V';
     this.uploadFilename.value = '';
-    this.btnUpload.disabled = true;
-    if (this.btnDownloadBasicCsv) this.btnDownloadBasicCsv.disabled = true;
-    if (this.btnDownloadBiomedCsv) this.btnDownloadBiomedCsv.disabled = true;
-    if (this.btnDownloadMixCsv) this.btnDownloadMixCsv.disabled = true;
+    this.updateRecordButtonsState();
   }
 
   setLoadedSignal(signalData) {
@@ -426,10 +591,26 @@ class App {
 
     // Preset flash filename
     this.uploadFilename.value = `${signalData.name.substring(0, 12)}.CSV`;
-    this.btnUpload.disabled = !this.activeComm || !this.activeComm.isConnected;
-    if (this.btnDownloadBasicCsv) this.btnDownloadBasicCsv.disabled = false;
-    if (this.btnDownloadBiomedCsv) this.btnDownloadBiomedCsv.disabled = false;
-    if (this.btnDownloadMixCsv) this.btnDownloadMixCsv.disabled = false;
+    this.updateRecordButtonsState();
+  }
+
+  updateRecordButtonsState() {
+    const isConn = this.activeComm && this.activeComm.isConnected;
+    const hasSig = !!this.currentSignal;
+    const canSave = isConn && hasSig;
+
+    // Flash Save buttons across all tabs
+    if (this.btnSaveBasicToArduino) this.btnSaveBasicToArduino.disabled = !canSave;
+    if (this.btnSaveBiomedToArduino) this.btnSaveBiomedToArduino.disabled = !canSave;
+    if (this.btnSaveMixToArduino) this.btnSaveMixToArduino.disabled = !canSave;
+    if (this.btnSaveFileToArduino) this.btnSaveFileToArduino.disabled = !canSave;
+    if (this.btnUpload) this.btnUpload.disabled = !canSave;
+
+    // CSV Download buttons
+    if (this.btnDownloadBasicCsv) this.btnDownloadBasicCsv.disabled = !hasSig;
+    if (this.btnDownloadBiomedCsv) this.btnDownloadBiomedCsv.disabled = !hasSig;
+    if (this.btnDownloadMixCsv) this.btnDownloadMixCsv.disabled = !hasSig;
+    if (this.btnDownloadFileCsv) this.btnDownloadFileCsv.disabled = !hasSig;
   }
 
   async loadSampleFile(filename) {
@@ -440,7 +621,7 @@ class App {
       const text = await resp.text();
       const signalData = SignalGenerator.parseFileContent(text, filename);
       this.setLoadedSignal(signalData);
-      this.log(`Muestra cargada: ${signalData.name}`, 'success');
+      this.log(`Muestra cargada: ${signalData.name} (${signalData.samples.length} pts)`, 'success');
     } catch (err) {
       this.log(`Error al cargar muestra: ${err.message}`, 'error');
     }
@@ -508,12 +689,12 @@ class App {
     this.btnDisconnect.disabled = false;
     this.btnSerial.disabled = true;
     this.btnBle.disabled = true;
-    this.btnUpload.disabled = !this.currentSignal;
     this.btnRefreshFiles.disabled = false;
     this.btnPlay.disabled = false;
     this.btnStop.disabled = false;
+    this.updateRecordButtonsState();
 
-    // Send PING and request files
+    // Send PING and request files list
     setTimeout(() => {
       this.sendToDevice('PING\n');
       this.requestFileList();
@@ -531,13 +712,13 @@ class App {
       this.btnDisconnect.disabled = true;
       this.btnSerial.disabled = false;
       this.btnBle.disabled = false;
-      this.btnUpload.disabled = true;
       this.btnRefreshFiles.disabled = true;
       this.btnPlay.disabled = true;
       this.btnStop.disabled = true;
       this.activeComm = null;
       this.log('Dispositivo desconectado.', 'info');
     }
+    this.updateRecordButtonsState();
   }
 
   async sendToDevice(cmd) {
@@ -549,41 +730,80 @@ class App {
     await this.activeComm.send(cmd);
   }
 
+  // ==========================================================================
+  // FLASH TRANSFER WITH STRICT SAMPLE CAPACITY CHECK
+  // ==========================================================================
   async uploadSignalToDevice() {
-    if (!this.currentSignal || !this.activeComm || this.isUploading) return;
+    if (!this.currentSignal) {
+      alert('Primero debes generar o cargar una señal antes de grabar en Arduino.');
+      return;
+    }
 
-    const filename = this.uploadFilename.value.trim() || 'CUSTOM.CSV';
+    if (!this.activeComm || !this.activeComm.isConnected) {
+      alert('Debes conectarte al Arduino (por Web Serial o Web Bluetooth) para poder grabar.');
+      return;
+    }
+
+    if (this.isUploading) return;
+
+    // Strict RAM Limit check for Arduino Uno R4 (MAX 2500 samples)
+    const MAX_SAMPLES_ALLOWED = 2500;
+    if (this.currentSignal.samples.length > MAX_SAMPLES_ALLOWED) {
+      const msg = `La señal actual tiene ${this.currentSignal.samples.length} muestras, lo que supera el límite de memoria del Arduino Uno R4 (máx. ${MAX_SAMPLES_ALLOWED} muestras por archivo).\n\nPor favor reduce la duración (ej. a 2 - 4 seg) o la frecuencia Fs (ej. 250 Hz o 500 Hz) para poder grabarla en memoria.`;
+      alert(msg);
+      this.log(`Error: ${msg}`, 'error');
+      return;
+    }
+
+    let filename = this.uploadFilename.value.trim();
+    if (!filename) {
+      filename = `${this.currentSignal.name.substring(0, 12)}.CSV`;
+    }
+
     const packets = Protocol.createUploadPackets(
       filename,
       this.currentSignal.samplingRate,
       this.currentSignal.samples,
-      25 // 25 samples per packet fits comfortably in standard BLE/Serial MTU
+      16 // 16 samples per line fits comfortably within serial & BLE line buffers
     );
 
     this.isUploading = true;
-    this.btnUpload.disabled = true;
+    this.updateRecordButtonsState();
     this.uploadProgressContainer.style.display = 'block';
     this.uploadProgressBar.style.width = '0%';
 
-    this.log(`Enviando ${filename} (${this.currentSignal.samples.length} muestras, ${packets.length} paquetes)...`, 'info');
+    this.log(`Iniciando grabación de ${filename} (${this.currentSignal.samples.length} muestras, ${packets.length} paquetes)...`, 'info');
+
+    let abortedDueToError = false;
+    const tempListener = (line) => {
+      if (line.includes('ERR')) {
+        abortedDueToError = true;
+      }
+    };
 
     try {
       for (let i = 0; i < packets.length; i++) {
+        if (abortedDueToError) {
+          throw new Error('El Arduino rechazó la grabación (capacidad o parámetro inválido).');
+        }
+
         const pkt = packets[i];
         await this.activeComm.send(pkt.command);
-        
+
         const pct = Math.round(((i + 1) / packets.length) * 100);
         this.uploadProgressBar.style.width = `${pct}%`;
 
-        // Small yield to allow Arduino processing
-        await new Promise(r => setTimeout(r, 18));
+        // 25ms yield allows the Renesas MCU to process and store samples
+        await new Promise(r => setTimeout(r, 25));
       }
+
       this.log(`Envío completado. Esperando confirmación de almacenamiento...`, 'info');
     } catch (err) {
       this.log(`Error durante la transmisión: ${err.message}`, 'error');
+      alert(`Error al grabar en Arduino: ${err.message}`);
     } finally {
       this.isUploading = false;
-      this.btnUpload.disabled = false;
+      this.updateRecordButtonsState();
       setTimeout(() => {
         this.uploadProgressContainer.style.display = 'none';
         this.requestFileList();
@@ -640,7 +860,7 @@ class App {
         break;
 
       case 'SAVED':
-        this.log(`Archivo ${parsed.file} guardado exitosamente en Flash de Arduino.`, 'success');
+        this.log(`¡Éxito! Archivo ${parsed.file} grabado en la memoria Flash del Arduino.`, 'success');
         this.requestFileList();
         break;
 
@@ -664,7 +884,7 @@ class App {
       const isSelected = this.selectedFile === f.name || (!this.selectedFile && idx === 0);
       if (isSelected) {
         this.selectedFile = f.name;
-        tr.style.backgroundColor = 'rgba(6, 182, 212, 0.15)';
+        tr.style.backgroundColor = '#e0f2fe';
       }
 
       tr.innerHTML = `
