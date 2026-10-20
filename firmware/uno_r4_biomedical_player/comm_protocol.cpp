@@ -21,6 +21,10 @@ void CommProtocol::processLine(const char* line, Print& out) {
     handleList(out);
   } else if (strncmp(line, "WRITE", 5) == 0) {
     handleWrite(line + 5, out);
+  } else if (strncmp(line, "PREVIEW", 7) == 0) {
+    handlePreview(line + 7, out);
+  } else if (strncmp(line, "PRUN", 4) == 0) {
+    handlePreviewRun(line + 4, out);
   } else if (line[0] == 'D' && (line[1] == ' ' || line[1] == '\t')) {
     handleData(line + 2, out);
   } else if (strncmp(line, "COMMIT", 6) == 0) {
@@ -31,6 +35,8 @@ void CommProtocol::processLine(const char* line, Print& out) {
     handleStop(out);
   } else if (strncmp(line, "STATUS", 6) == 0) {
     handleStatus(out);
+  } else if (strncmp(line, "DELETE", 6) == 0) {
+    handleDelete(line + 6, out);
   } else {
     out.print("ERR UNKNOWN COMMAND: ");
     out.println(line);
@@ -58,6 +64,16 @@ void CommProtocol::handleList(Print& out) {
     }
   }
   out.println();
+  
+  // Real-time Storage Metrics: CAPACITY:<usedSlots>:<maxSlots>:<poolUsed>:<poolMax>
+  out.print("CAPACITY:");
+  out.print(_storage.getCustomCount());
+  out.print(":");
+  out.print(MAX_CUSTOM_FILES);
+  out.print(":");
+  out.print(_storage.getPoolUsed());
+  out.print(":");
+  out.println(CUSTOM_POOL_SAMPLES);
 }
 
 void CommProtocol::handleWrite(const char* args, Print& out) {
@@ -72,12 +88,55 @@ void CommProtocol::handleWrite(const char* args, Print& out) {
     return;
   }
 
+  // Ensure player is stopped before reallocating/writing memory buffers
+  _player.stop();
+
   if (_storage.startWrite(filename, fs, count)) {
     out.println("OK READY");
   } else {
     out.print("ERR WRITE CAPACITY EXCEEDED (MAX ");
-    out.print(MAX_CUSTOM_SAMPLES);
+    out.print(MAX_SAMPLES_PER_FILE);
     out.println(" SAMPLES)");
+  }
+}
+
+void CommProtocol::handlePreview(const char* args, Print& out) {
+  // Args format: <NAME> <FS> <TOTAL_SAMPLES>
+  char name[18] = {0};
+  int fs = 250;
+  int count = 0;
+
+  int parsed = sscanf(args, "%16s %d %d", name, &fs, &count);
+  if (parsed < 3 || count <= 0) {
+    out.println("ERR INVALID PREVIEW PARAMETERS");
+    return;
+  }
+
+  _player.stop();
+
+  if (_storage.startPreviewWrite(name, fs, count)) {
+    out.println("OK READY PREVIEW");
+  } else {
+    out.print("ERR PREVIEW CAPACITY (MAX ");
+    out.print(MAX_PREVIEW_SAMPLES);
+    out.println(" SAMPLES)");
+  }
+}
+
+void CommProtocol::handlePreviewRun(const char* args, Print& out) {
+  int loop = 1;
+  sscanf(args, "%d", &loop);
+
+  if (_storage.commitPreviewWrite()) {
+    WaveformEntry* pEntry = _storage.getPreviewEntry();
+    if (_player.play(pEntry, loop != 0)) {
+      out.print("OK PLAYING PREVIEW ");
+      out.println(pEntry->name);
+    } else {
+      out.println("ERR PREVIEW PLAY FAILED");
+    }
+  } else {
+    out.println("ERR PREVIEW COMMIT FAILED");
   }
 }
 
@@ -106,7 +165,14 @@ void CommProtocol::handleData(const char* args, Print& out) {
     token = strtok(nullptr, " ,\t\r\n");
   }
 
-  if (sampleCount > 0 && _storage.appendSamples(samples, sampleCount)) {
+  bool ok = false;
+  if (_storage.isWriting()) {
+    ok = _storage.appendSamples(samples, sampleCount);
+  } else if (_storage.isPreviewWriting()) {
+    ok = _storage.appendPreviewSamples(samples, sampleCount);
+  }
+
+  if (sampleCount > 0 && ok) {
     out.print("ACK ");
     out.println(seq);
   } else {
@@ -138,6 +204,8 @@ void CommProtocol::handlePlay(const char* args, Print& out) {
     return;
   }
 
+  _storage.setPreviewActive(false);
+
   if (_player.play(entry, loop != 0)) {
     out.print("OK PLAYING ");
     out.println(entry->name);
@@ -148,6 +216,7 @@ void CommProtocol::handlePlay(const char* args, Print& out) {
 
 void CommProtocol::handleStop(Print& out) {
   _player.stop();
+  _storage.setPreviewActive(false);
   out.println("OK STOPPED");
 }
 
@@ -161,4 +230,36 @@ void CommProtocol::handleStatus(Print& out) {
   out.print(_player.getCurrentIndex());
   out.print(":");
   out.println(_player.getSampleRate());
+}
+
+void CommProtocol::handleDelete(const char* args, Print& out) {
+  while (*args == ' ' || *args == '\t') args++;
+  if (*args == '\0') {
+    out.println("ERR DELETE FILENAME MISSING");
+    return;
+  }
+
+  char filename[18] = {0};
+  sscanf(args, "%16s", filename);
+
+  if (strcasecmp(filename, "ALL") == 0) {
+    _player.stop();
+    _storage.deleteAllCustomFiles();
+    out.println("OK DELETED ALL");
+    return;
+  }
+
+  // If active file is being deleted, stop playback first
+  const WaveformEntry* active = _player.getActiveFile();
+  if (active && strcasecmp(active->name, filename) == 0) {
+    _player.stop();
+  }
+
+  if (_storage.deleteFile(filename)) {
+    out.print("OK DELETED ");
+    out.println(filename);
+  } else {
+    out.print("ERR DELETE FAILED: ");
+    out.println(filename);
+  }
 }

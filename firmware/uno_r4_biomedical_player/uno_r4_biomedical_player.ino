@@ -151,11 +151,11 @@ LinkType getActiveLinkType() {
 }
 
 // Serial and BLE reception buffers
-char serialBuffer[128];
-uint8_t serialBufferIdx = 0;
+char serialBuffer[256];
+uint16_t serialBufferIdx = 0;
 
-char bleBuffer[128];
-uint8_t bleBufferIdx = 0;
+char bleBuffer[256];
+uint16_t bleBufferIdx = 0;
 
 // Forward declarations
 void updateLcdDisplay(bool forceFull);
@@ -236,8 +236,8 @@ void loop() {
   // D. Process Local Keypad on Pin A2
   handleKeypad();
 
-  // E. Periodic LCD Refresh
-  if (millis() - lastLcdUpdate >= 180) {
+  // E. Periodic LCD Refresh (Skip during streaming write to avoid dropping UART/BLE bytes)
+  if (!fileStorage.isWriting() && (millis() - lastLcdUpdate >= 180)) {
     lastLcdUpdate = millis();
     updateLcdDisplay(false);
   }
@@ -334,9 +334,12 @@ void updateLcdDisplay(bool forceFull) {
   bool isPlaying = dacPlayer.isPlaying();
 
   // Si esta reproduciendo activamente, mantener sincronizado con el archivo en ejecucion
+  WaveformEntry* entry = nullptr;
   if (isPlaying) {
     const WaveformEntry* activeEntry = dacPlayer.getActiveFile();
-    if (activeEntry) {
+    if (activeEntry == fileStorage.getPreviewEntry()) {
+      entry = fileStorage.getPreviewEntry();
+    } else if (activeEntry) {
       int8_t activeIdx = fileStorage.findFileIndex(activeEntry->name);
       if (activeIdx >= 0) {
         selectedFileIndex = activeIdx;
@@ -344,12 +347,25 @@ void updateLcdDisplay(bool forceFull) {
     }
   }
 
-  if (selectedFileIndex >= totalFiles) {
-    selectedFileIndex = 0;
+  if (!entry) {
+    if (selectedFileIndex >= totalFiles) {
+      selectedFileIndex = 0;
+    }
+    entry = fileStorage.getFile(selectedFileIndex);
   }
-
-  WaveformEntry* entry = fileStorage.getFile(selectedFileIndex);
   if (!entry) return;
+
+  // Fast path: if only periodic refresh while playing, only update heartbeat icon (100 us vs 20 ms)
+  if (!forceFull && isPlaying) {
+    lcd.setCursor(15, 0);
+    heartBeatBlink = !heartBeatBlink;
+    if (heartBeatBlink) {
+      lcd.write(byte(0)); // Latido Corazón (♥)
+    } else {
+      lcd.print(" ");
+    }
+    return;
+  }
 
   LinkType link = getActiveLinkType();
 
@@ -414,14 +430,14 @@ void updateLcdDisplay(bool forceFull) {
   line2[16] = '\0';
 
   switch (detailViewIndex) {
-    case 0:
-      // Vista 0: Frecuencia (Fs), Muestras (pt) y Tipo (ROM/FLS)
-      // Ej: "250Hz  500pt ROM " o "500Hz 1000pt FLASH"
+    case 0: {
+      const char* typeTag = (entry == fileStorage.getPreviewEntry()) ? "RAM" : (entry->isRom ? "ROM" : "FLASH");
       snprintf(line2, sizeof(line2), "%3uHz %4upt %-5s",
                entry->samplingRate,
                entry->length,
-               entry->isRom ? "ROM" : "FLASH");
+               typeTag);
       break;
+    }
 
     case 1: {
       // Vista 1: Duración calculada en segundos
@@ -430,7 +446,8 @@ void updateLcdDisplay(bool forceFull) {
       float durSec = (float)entry->length / (float)fs;
       char durStr[8];
       dtostrf(durSec, 4, 2, durStr);
-      snprintf(line2, sizeof(line2), "Dur:%ss %-7s", durStr, entry->isRom ? "[ROM]" : "[FLASH]");
+      const char* tagBracket = (entry == fileStorage.getPreviewEntry()) ? "[RAM]" : (entry->isRom ? "[ROM]" : "[FLASH]");
+      snprintf(line2, sizeof(line2), "Dur:%ss %-7s", durStr, tagBracket);
       break;
     }
 
@@ -485,8 +502,16 @@ void handleSerialInput() {
     if (c == '\n') {
       serialBuffer[serialBufferIdx] = '\0';
       if (serialBufferIdx > 0) {
+        bool isData = (serialBuffer[0] == 'D' && (serialBuffer[1] == ' ' || serialBuffer[1] == '\t'));
+        bool isWrite = (serialBuffer[0] == 'W' && serialBuffer[1] == 'R');
+        bool isCommit = (serialBuffer[0] == 'C' && serialBuffer[1] == 'O');
+        
         comm.processLine(serialBuffer, Serial);
-        updateLcdDisplay(true);
+        
+        // Update LCD only on commands that change state outside of streaming
+        if (!isData && !isWrite) {
+          updateLcdDisplay(true);
+        }
       }
       serialBufferIdx = 0;
     } else {
@@ -511,9 +536,15 @@ void handleBleInput() {
         if (c == '\n') {
           bleBuffer[bleBufferIdx] = '\0';
           if (bleBufferIdx > 0) {
+            bool isData = (bleBuffer[0] == 'D' && (bleBuffer[1] == ' ' || bleBuffer[1] == '\t'));
+            bool isWrite = (bleBuffer[0] == 'W' && bleBuffer[1] == 'R');
+            
             comm.processLine(bleBuffer, blePrint);
             blePrint.flushBuffer();
-            updateLcdDisplay(true);
+            
+            if (!isData && !isWrite) {
+              updateLcdDisplay(true);
+            }
           }
           bleBufferIdx = 0;
         } else {

@@ -27,4 +27,7 @@ private:
   void handlePlay(const char* args, Print& out);
   void handleStop(Print& out);
   void handleStatus(Print& out);
+  void handleDelete(const char* args, Print& out);
+  void handlePreview(const char* args, Print& out);
+  void handlePreviewRun(const char* args, Print& out);
 };

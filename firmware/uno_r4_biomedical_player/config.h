@@ -42,8 +42,10 @@
 #define KEYPAD_THRESHOLD_SELECT  800
 
 // --- SYSTEM LIMITS ---
-#define MAX_CUSTOM_FILES         2
-#define MAX_CUSTOM_SAMPLES       2500   // 2500 samples @ 250 Hz = 10.0 seconds (5.0s @ 500 Hz)
+#define MAX_CUSTOM_FILES         8      // Up to 8 user waveform files (4x previous capacity)
+#define CUSTOM_POOL_SAMPLES      4000   // 4000 samples shared dynamic pool (8 KB RAM, e.g. 8 files x 500 pts)
+#define MAX_SAMPLES_PER_FILE     1500   // Max 1500 samples for any single stored file (6.0s @ 250 Hz)
+#define MAX_PREVIEW_SAMPLES      1000   // Dedicated Live RAM Preview buffer (2 KB RAM, 4.0s @ 250 Hz)
 #define SERIAL_BAUD_RATE         115200
 
 // BLE configuration (Nordic UART Service)

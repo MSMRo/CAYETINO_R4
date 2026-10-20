@@ -23,6 +23,10 @@ class App {
     this.selectedFile = null;
     this.isPlaying = false;
     this.isUploading = false;
+    this.responseWaiters = [];
+    this.activeTabKey = 'tabBasic';
+    this.playheadAnimId = null;
+    this.capacityInfo = { usedSlots: 0, maxSlots: 8, poolUsed: 0, poolMax: 4000 };
 
     // Mixer state
     this.numMixComponents = 2; // 2 or 3
@@ -153,6 +157,11 @@ class App {
     this.uploadProgressContainer = document.getElementById('uploadProgressContainer');
     this.uploadProgressBar = document.getElementById('uploadProgressBar');
     this.btnRefreshFiles = document.getElementById('btnRefreshFiles');
+    this.btnClearAllFlash = document.getElementById('btnClearAllFlash');
+    this.flashSlotCount = document.getElementById('flashSlotCount');
+    this.flashSlotBadge = document.getElementById('flashSlotBadge');
+    this.flashSlotProgressBar = document.getElementById('flashSlotProgressBar');
+    this.flashSlotHint = document.getElementById('flashSlotHint');
     this.fileTableBody = document.getElementById('fileTableBody');
 
     // Oscilloscope Stats
@@ -347,7 +356,19 @@ class App {
       this.uploadSignalToDevice(name);
     });
     this.btnRefreshFiles.addEventListener('click', () => this.requestFileList());
-    this.btnPlay.addEventListener('click', () => this.playSelectedFile());
+    if (this.btnClearAllFlash) {
+      this.btnClearAllFlash.addEventListener('click', () => {
+        if (!this.activeComm || !this.activeComm.isConnected) {
+          alert('Debes conectarte al Arduino para realizar esta acción.');
+          return;
+        }
+        if (confirm('¿Estás seguro de que deseas borrar TODAS las señales personalizadas guardadas en la memoria Flash del Arduino?')) {
+          this.log('Solicitando borrar todas las señales en Flash...', 'info');
+          this.sendToDevice('DELETE ALL\n');
+        }
+      });
+    }
+    this.btnPlay.addEventListener('click', () => this.handlePlayClick());
     this.btnStop.addEventListener('click', () => this.stopPlayback());
 
     if (this.btnClearLogs) {
@@ -358,6 +379,7 @@ class App {
   }
 
   switchTab(targetTab) {
+    this.activeTabKey = targetTab;
     this.tabButtons.forEach(b => {
       if (b.getAttribute('data-tab') === targetTab) {
         b.classList.add('active');
@@ -759,8 +781,36 @@ class App {
     await this.activeComm.send(cmd);
   }
 
+  waitForResponse(successPredicate, errorPredicate, timeoutMs = 4000) {
+    return new Promise((resolve, reject) => {
+      let timer = null;
+      const handler = (line) => {
+        if (errorPredicate && errorPredicate(line)) {
+          cleanup();
+          reject(new Error(line));
+        } else if (successPredicate(line)) {
+          cleanup();
+          resolve(line);
+        }
+      };
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        const idx = this.responseWaiters.indexOf(handler);
+        if (idx !== -1) this.responseWaiters.splice(idx, 1);
+      };
+
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Tiempo agotado (${timeoutMs} ms) esperando respuesta del Arduino.`));
+      }, timeoutMs);
+
+      this.responseWaiters.push(handler);
+    });
+  }
+
   // ==========================================================================
-  // FLASH TRANSFER WITH STRICT SAMPLE CAPACITY CHECK
+  // FLASH TRANSFER WITH STRICT SAMPLE CAPACITY CHECK & FLOW CONTROL
   // ==========================================================================
   async uploadSignalToDevice(customFilename = null) {
     if (!this.currentSignal) {
@@ -775,10 +825,10 @@ class App {
 
     if (this.isUploading) return;
 
-    // Strict RAM Limit check for Arduino Uno R4 (MAX 2500 samples)
-    const MAX_SAMPLES_ALLOWED = 2500;
+    // Capacity check for Arduino Uno R4 (MAX 1500 samples per file in pool)
+    const MAX_SAMPLES_ALLOWED = 1500;
     if (this.currentSignal.samples.length > MAX_SAMPLES_ALLOWED) {
-      const msg = `La señal actual tiene ${this.currentSignal.samples.length} muestras, lo que supera el límite de memoria del Arduino Uno R4 (máx. ${MAX_SAMPLES_ALLOWED} muestras por archivo).\n\nPor favor reduce la duración (ej. a 2 - 4 seg) o la frecuencia Fs (ej. 250 Hz o 500 Hz) para poder grabarla en memoria.`;
+      const msg = `La señal actual tiene ${this.currentSignal.samples.length} muestras, lo que supera el límite por archivo del Arduino Uno R4 (máx. ${MAX_SAMPLES_ALLOWED} muestras por archivo).\n\nPor favor reduce la duración (ej. a 2 - 4 seg) o la frecuencia Fs (ej. 250 Hz) para poder grabarla en memoria Flash.`;
       alert(msg);
       this.log(`Error: ${msg}`, 'error');
       return;
@@ -814,47 +864,98 @@ class App {
       10 // 10 samples per packet fits reliably within single BLE MTU and Serial buffers (<55 bytes)
     );
 
+    const initPacket = packets[0]; // WRITE <cleanName> <fs> <count>\n
+    const dataPackets = packets.slice(1, -1); // D seq ...
+    const commitPacket = packets[packets.length - 1]; // COMMIT\n
+
     this.isUploading = true;
     this.updateRecordButtonsState();
     this.uploadProgressContainer.style.display = 'block';
-    this.uploadProgressBar.style.width = '0%';
+    this.uploadProgressBar.style.width = '2%';
 
-    this.log(`Iniciando grabación de ${filename} (${this.currentSignal.samples.length} muestras, ${packets.length} paquetes)...`, 'info');
+    this.log(`Iniciando grabación de ${filename} (${this.currentSignal.samples.length} muestras, ${dataPackets.length} paquetes)...`, 'info');
 
-    let abortedDueToError = false;
-    const tempListener = (line) => {
+    let streamError = null;
+    const streamErrorHandler = (line) => {
       if (line.includes('ERR')) {
-        abortedDueToError = true;
+        streamError = line;
       }
     };
 
     try {
-      for (let i = 0; i < packets.length; i++) {
-        if (abortedDueToError) {
-          throw new Error('El Arduino rechazó la grabación (capacidad o parámetro inválido).');
+      // 1. Handshake inicial: Enviar WRITE y esperar OK READY
+      this.log(`TX: ${initPacket.command.trim()}`, 'tx');
+      const writePromise = this.waitForResponse(
+        (line) => line.includes('OK READY'),
+        (line) => line.includes('ERR'),
+        4000
+      );
+      await this.activeComm.send(initPacket.command);
+      await writePromise;
+      this.log(`Arduino listo para recibir datos (OK READY). Transmitiendo muestras...`, 'success');
+
+      // 2. Transmisión de paquetes de muestras (D seq ...)
+      this.responseWaiters.push(streamErrorHandler);
+      const isBle = (this.activeComm === this.ble);
+      const pacingMs = isBle ? 35 : 20;
+
+      for (let i = 0; i < dataPackets.length; i++) {
+        if (streamError) {
+          throw new Error(`Arduino rechazó un paquete: ${streamError}`);
         }
 
-        const pkt = packets[i];
+        const pkt = dataPackets[i];
         await this.activeComm.send(pkt.command);
 
-        const pct = Math.round(((i + 1) / packets.length) * 100);
+        const pct = Math.round(5 + ((i + 1) / dataPackets.length) * 85);
         this.uploadProgressBar.style.width = `${pct}%`;
 
-        // 25ms yield allows the Renesas MCU to process and store samples
-        await new Promise(r => setTimeout(r, 25));
+        await new Promise(r => setTimeout(r, pacingMs));
       }
 
-      this.log(`Envío completado. Esperando confirmación de almacenamiento...`, 'info');
+      // Desenganchar listener de errores de datos
+      const errIdx = this.responseWaiters.indexOf(streamErrorHandler);
+      if (errIdx !== -1) this.responseWaiters.splice(errIdx, 1);
+
+      if (streamError) {
+        throw new Error(`Error durante la transmisión: ${streamError}`);
+      }
+
+      // 3. Handshake final: Enviar COMMIT y esperar OK SAVED
+      this.uploadProgressBar.style.width = '95%';
+      this.log(`TX: COMMIT`, 'tx');
+      const commitPromise = this.waitForResponse(
+        (line) => line.includes('OK SAVED'),
+        (line) => line.includes('ERR'),
+        4000
+      );
+      await this.activeComm.send(commitPacket.command);
+      await commitPromise;
+
+      this.uploadProgressBar.style.width = '100%';
+      this.selectedFile = filename;
+      this.nowPlayingLabel.innerHTML = `<span>💾 Grabado y Listo: <strong>${filename}</strong> (Pulsa ▶ Reproducir para iniciar salida DAC A0)</span>`;
+      this.nowPlayingLabel.classList.add('active');
+      this.btnPlay.disabled = false;
+      this.btnStop.disabled = false;
+      this.log(`¡Éxito! Archivo ${filename} grabado exitosamente en memoria del Arduino Uno R4.`, 'success');
+      alert(`¡Archivo ${filename} grabado exitosamente en el Arduino Uno R4!\n\nPuedes pulsar 'Reproducir (Play)' en cualquier pestaña para iniciar la salida analógica DAC A0.`);
+
     } catch (err) {
-      this.log(`Error durante la transmisión: ${err.message}`, 'error');
-      alert(`Error al grabar en Arduino: ${err.message}`);
+      this.log(`Error al grabar en Arduino: ${err.message}`, 'error');
+      alert(`Error al grabar en Arduino:\n${err.message}`);
     } finally {
+      // Limpiar handler en caso de salida por excepción
+      const errIdx = this.responseWaiters.indexOf(streamErrorHandler);
+      if (errIdx !== -1) this.responseWaiters.splice(errIdx, 1);
+
       this.isUploading = false;
       this.updateRecordButtonsState();
       setTimeout(() => {
         this.uploadProgressContainer.style.display = 'none';
+        this.uploadProgressBar.style.width = '0%';
         this.requestFileList();
-      }, 1000);
+      }, 1200);
     }
   }
 
@@ -862,24 +963,253 @@ class App {
     this.sendToDevice(Protocol.createListCommand());
   }
 
+  handlePlayClick() {
+    if (this.activeTabKey === 'tabFlash') {
+      this.playSelectedFile();
+    } else {
+      this.playLivePreview();
+    }
+  }
+
+  async playLivePreview() {
+    if (!this.activeComm || !this.activeComm.isConnected) {
+      alert('Debes conectarte al Arduino Uno R4 (por Web Serial o Web Bluetooth) para reproducir en vivo por DAC A0.');
+      return;
+    }
+
+    // Auto-generate if signal is missing but user is on a generator tab
+    if (!this.currentSignal) {
+      if (this.activeTabKey === 'tabBasic') {
+        this.generateActiveSignal('basic');
+      } else if (this.activeTabKey === 'tabBiomed') {
+        this.generateActiveSignal('biomed');
+      } else if (this.activeTabKey === 'tabMixer') {
+        this.generateActiveSignal('mixer');
+      }
+    }
+
+    if (!this.currentSignal || !this.currentSignal.samples || this.currentSignal.samples.length === 0) {
+      alert('Primero genera o carga una señal en esta pestaña para reproducirla en vivo.');
+      return;
+    }
+
+    if (this.isUploading) return;
+
+    // Buffer limit in Arduino RAM preview buffer (MAX_PREVIEW_SAMPLES = 1000)
+    const MAX_PREVIEW = 1000;
+    let samples = this.currentSignal.samples;
+    if (samples.length > MAX_PREVIEW) {
+      this.log(`Aviso: La señal tiene ${samples.length} muestras. El búfer de reproducción en RAM admite hasta ${MAX_PREVIEW} pts (4.0s @ 250Hz). Se enviarán los primeros ${MAX_PREVIEW} pts.`, 'warn');
+      samples = samples.slice(0, MAX_PREVIEW);
+    }
+
+    const loop = this.chkLoop ? this.chkLoop.checked : true;
+    let rawName = this.currentSignal.name || 'PREVIEW';
+    let cleanName = rawName.toUpperCase().replace(/[^A-Z0-9_]/g, '_').substring(0, 12);
+    if (!cleanName) cleanName = 'PREVIEW';
+
+    const packets = Protocol.createPreviewPackets(
+      cleanName,
+      this.currentSignal.samplingRate,
+      samples,
+      10,
+      loop
+    );
+
+    const initPacket = packets[0]; // PREVIEW <name> <fs> <count>\n
+    const dataPackets = packets.slice(1, -1); // D seq ...
+    const runPacket = packets[packets.length - 1]; // PRUN <loop>\n
+
+    this.isUploading = true;
+    this.updateRecordButtonsState();
+    this.uploadProgressContainer.style.display = 'block';
+    this.uploadProgressBar.style.width = '5%';
+
+    this.log(`Iniciando reproducción en vivo en RAM: ${cleanName} (${samples.length} pts @ ${this.currentSignal.samplingRate} Hz, sin ocupar Flash)...`, 'info');
+
+    let streamError = null;
+    const streamErrorHandler = (line) => {
+      if (line.includes('ERR')) {
+        streamError = line;
+      }
+    };
+
+    try {
+      // 1. Handshake inicial PREVIEW
+      this.log(`TX: ${initPacket.command.trim()}`, 'tx');
+      const previewInitPromise = this.waitForResponse(
+        (line) => line.includes('OK READY PREVIEW') || line.includes('OK READY'),
+        (line) => line.includes('ERR'),
+        4000
+      );
+      await this.activeComm.send(initPacket.command);
+      await previewInitPromise;
+
+      // 2. Transmisión rápida a RAM
+      this.responseWaiters.push(streamErrorHandler);
+      const isBle = (this.activeComm === this.ble);
+      const pacingMs = isBle ? 30 : 15;
+
+      for (let i = 0; i < dataPackets.length; i++) {
+        if (streamError) {
+          throw new Error(`Arduino rechazó un paquete: ${streamError}`);
+        }
+        await this.activeComm.send(dataPackets[i].command);
+        const pct = Math.round(5 + ((i + 1) / dataPackets.length) * 85);
+        this.uploadProgressBar.style.width = `${pct}%`;
+        await new Promise(r => setTimeout(r, pacingMs));
+      }
+
+      const errIdx = this.responseWaiters.indexOf(streamErrorHandler);
+      if (errIdx !== -1) this.responseWaiters.splice(errIdx, 1);
+
+      if (streamError) {
+        throw new Error(`Error en transmisión a RAM: ${streamError}`);
+      }
+
+      // 3. Comando PRUN para iniciar ejecución inmediata
+      this.uploadProgressBar.style.width = '95%';
+      this.log(`TX: ${runPacket.command.trim()}`, 'tx');
+      const runPromise = this.waitForResponse(
+        (line) => line.includes('OK PLAYING PREVIEW') || line.includes('OK PLAYING'),
+        (line) => line.includes('ERR'),
+        4000
+      );
+      await this.activeComm.send(runPacket.command);
+      await runPromise;
+
+      this.uploadProgressBar.style.width = '100%';
+      this.isPlaying = true;
+      this.statusDot.className = 'status-dot playing';
+      this.nowPlayingLabel.innerHTML = `<span>▶ En Vivo (RAM): <strong>${cleanName}</strong> (${samples.length} pts @ ${this.currentSignal.samplingRate} Hz - DAC A0 Activo)</span>`;
+      this.nowPlayingLabel.classList.add('active');
+      this.startPlayheadAnimation(samples.length, this.currentSignal.samplingRate, loop);
+
+      this.log(`¡Reproducción en vivo activa! Señal emitiéndose en tiempo real por el pin DAC A0.`, 'success');
+    } catch (err) {
+      this.log(`Error al reproducir en vivo: ${err.message}`, 'error');
+      alert(`Error al reproducir en vivo en Arduino:\n${err.message}`);
+    } finally {
+      const errIdx = this.responseWaiters.indexOf(streamErrorHandler);
+      if (errIdx !== -1) this.responseWaiters.splice(errIdx, 1);
+      this.isUploading = false;
+      this.updateRecordButtonsState();
+      setTimeout(() => {
+        this.uploadProgressContainer.style.display = 'none';
+        this.uploadProgressBar.style.width = '0%';
+      }, 800);
+    }
+  }
+
   playSelectedFile() {
+    if (!this.activeComm || !this.activeComm.isConnected) {
+      alert('Debes conectarte al Arduino para reproducir señales.');
+      return;
+    }
     if (!this.selectedFile && this.filesOnDevice.length > 0) {
       this.selectedFile = this.filesOnDevice[0].name;
     }
     if (!this.selectedFile) {
-      alert('Por favor selecciona un archivo de la lista.');
+      alert('Por favor selecciona un archivo de la lista en la pestaña Memoria Flash.');
       return;
     }
-    const loop = this.chkLoop.checked;
+    const loop = this.chkLoop ? this.chkLoop.checked : true;
     this.sendToDevice(Protocol.createPlayCommand(this.selectedFile, loop));
+
+    const fileObj = this.filesOnDevice.find(f => f.name === this.selectedFile);
+    if (fileObj) {
+      this.startPlayheadAnimation(fileObj.samples, fileObj.samplingRate, loop);
+    }
   }
 
   stopPlayback() {
+    this.stopPlayheadAnimation();
     this.sendToDevice(Protocol.createStopCommand());
+  }
+
+  startPlayheadAnimation(totalSamples, samplingRate, isLoop) {
+    this.stopPlayheadAnimation();
+    if (!totalSamples || totalSamples <= 0 || !samplingRate) return;
+
+    const startTime = performance.now();
+    const durationSec = totalSamples / samplingRate;
+
+    const step = () => {
+      if (!this.isPlaying) {
+        if (this.renderer) this.renderer.setPlayhead(-1);
+        return;
+      }
+      const elapsedSec = (performance.now() - startTime) / 1000;
+      let currentIndex = 0;
+      if (isLoop) {
+        const loopTime = elapsedSec % durationSec;
+        currentIndex = Math.floor(loopTime * samplingRate);
+      } else {
+        currentIndex = Math.floor(elapsedSec * samplingRate);
+        if (currentIndex >= totalSamples) {
+          if (this.renderer) this.renderer.setPlayhead(-1);
+          this.isPlaying = false;
+          this.statusDot.className = 'status-dot connected';
+          this.nowPlayingLabel.innerHTML = `<span>⏹ Reproducción finalizada</span>`;
+          this.nowPlayingLabel.classList.remove('active');
+          return;
+        }
+      }
+      if (this.renderer) this.renderer.setPlayhead(currentIndex);
+      this.playheadAnimId = requestAnimationFrame(step);
+    };
+
+    this.playheadAnimId = requestAnimationFrame(step);
+  }
+
+  stopPlayheadAnimation() {
+    if (this.playheadAnimId) {
+      cancelAnimationFrame(this.playheadAnimId);
+      this.playheadAnimId = null;
+    }
+    if (this.renderer) {
+      this.renderer.setPlayhead(-1);
+    }
+  }
+
+  updateCapacityUI() {
+    if (!this.capacityInfo) return;
+    const { usedSlots, maxSlots, poolUsed, poolMax } = this.capacityInfo;
+    if (this.flashSlotCount) this.flashSlotCount.textContent = usedSlots;
+    if (this.flashSlotProgressBar) {
+      const pct = Math.min(100, Math.round((usedSlots / maxSlots) * 100));
+      this.flashSlotProgressBar.style.width = `${pct}%`;
+      this.flashSlotProgressBar.style.backgroundColor = usedSlots >= maxSlots ? '#ef4444' : (usedSlots >= 6 ? '#f59e0b' : '#0284c7');
+    }
+    if (this.flashSlotBadge) {
+      if (usedSlots >= maxSlots) {
+        this.flashSlotBadge.textContent = `${usedSlots} / ${maxSlots} Lleno`;
+        this.flashSlotBadge.style.backgroundColor = '#fee2e2';
+        this.flashSlotBadge.style.color = '#b91c1c';
+      } else {
+        this.flashSlotBadge.textContent = `${usedSlots} / ${maxSlots} Guardados`;
+        this.flashSlotBadge.style.backgroundColor = '#e0f2fe';
+        this.flashSlotBadge.style.color = '#0369a1';
+      }
+    }
+    if (this.flashSlotHint) {
+      const freeSlots = maxSlots - usedSlots;
+      const freePool = Math.max(0, poolMax - poolUsed);
+      this.flashSlotHint.textContent = `Disponibles: ${freeSlots} de ${maxSlots} ranuras (${freePool} pts libres en pool)`;
+    }
   }
 
   handleDeviceResponse(line) {
     this.log(`RX: ${line}`, 'rx');
+
+    // Notify any active response waiters first (e.g. upload handshake)
+    if (this.responseWaiters && this.responseWaiters.length > 0) {
+      const waiters = [...this.responseWaiters];
+      for (const waiter of waiters) {
+        try { waiter(line); } catch (e) { console.error(e); }
+      }
+    }
+
     const parsed = Protocol.parseLine(line);
     if (!parsed) return;
 
@@ -892,6 +1222,18 @@ class App {
         this.renderFileList(parsed.files);
         break;
 
+      case 'CAPACITY':
+        this.capacityInfo = parsed;
+        this.updateCapacityUI();
+        break;
+
+      case 'PLAYING_PREVIEW':
+        this.isPlaying = true;
+        this.statusDot.className = 'status-dot playing';
+        this.nowPlayingLabel.innerHTML = `<span>▶ En Vivo (RAM): <strong>${parsed.file}</strong> (DAC A0 Activo)</span>`;
+        this.nowPlayingLabel.classList.add('active');
+        break;
+
       case 'PLAYING':
         this.isPlaying = true;
         this.statusDot.className = 'status-dot playing';
@@ -901,6 +1243,7 @@ class App {
 
       case 'STOPPED':
         this.isPlaying = false;
+        this.stopPlayheadAnimation();
         this.statusDot.className = 'status-dot connected';
         this.nowPlayingLabel.innerHTML = `<span>⏹ En espera (DAC A0 reposo)</span>`;
         this.nowPlayingLabel.classList.remove('active');
@@ -911,15 +1254,74 @@ class App {
         this.requestFileList();
         break;
 
+      case 'DELETED':
+        this.log(`Archivo ${parsed.file} eliminado de la memoria Flash del Arduino.`, 'success');
+        if (this.selectedFile === parsed.file || parsed.file === 'ALL') {
+          this.selectedFile = null;
+          if (this.isPlaying) {
+            this.isPlaying = false;
+            this.stopPlayheadAnimation();
+            this.statusDot.className = 'status-dot connected';
+            this.nowPlayingLabel.innerHTML = `<span>⏹ En espera (DAC A0 reposo)</span>`;
+            this.nowPlayingLabel.classList.remove('active');
+          }
+        }
+        this.requestFileList();
+        break;
+
       case 'ERROR':
         this.log(`Alerta de Arduino: ${parsed.message}`, 'error');
         break;
     }
   }
 
+  deleteFileFromDevice(filename) {
+    if (!this.activeComm || !this.activeComm.isConnected) {
+      alert('Debes conectarte al Arduino para borrar archivos.');
+      return;
+    }
+    this.log(`Solicitando borrar archivo ${filename}...`, 'info');
+    this.sendToDevice(Protocol.createDeleteCommand(filename));
+  }
+
   renderFileList(files) {
     this.filesOnDevice = files;
     this.fileTableBody.innerHTML = '';
+
+    // Update Flash capacity and slot meter
+    const flashFiles = files.filter(f => f.type === 'FLASH');
+    const customCount = flashFiles.length;
+    const maxSlots = 8;
+    const totalSamplesStored = flashFiles.reduce((acc, f) => acc + (f.samples || 0), 0);
+    const maxPool = 4000;
+
+    if (this.flashSlotCount) this.flashSlotCount.textContent = customCount;
+    if (this.flashSlotProgressBar) {
+      const pct = Math.min(100, Math.round((customCount / maxSlots) * 100));
+      this.flashSlotProgressBar.style.width = `${pct}%`;
+      this.flashSlotProgressBar.style.backgroundColor = customCount >= maxSlots ? '#ef4444' : (customCount >= 6 ? '#f59e0b' : '#0284c7');
+    }
+    if (this.flashSlotBadge) {
+      if (customCount >= maxSlots) {
+        this.flashSlotBadge.textContent = `${customCount} / ${maxSlots} Ocupado (Lleno)`;
+        this.flashSlotBadge.style.backgroundColor = '#fee2e2';
+        this.flashSlotBadge.style.color = '#b91c1c';
+      } else {
+        this.flashSlotBadge.textContent = `${customCount} / ${maxSlots} Guardados`;
+        this.flashSlotBadge.style.backgroundColor = '#e0f2fe';
+        this.flashSlotBadge.style.color = '#0369a1';
+      }
+    }
+    if (this.flashSlotHint) {
+      const freeSlots = maxSlots - customCount;
+      const freePool = Math.max(0, maxPool - totalSamplesStored);
+      this.flashSlotHint.textContent = freeSlots > 0
+        ? `Memoria disponible: ${freeSlots} de ${maxSlots} ranuras (${freePool} pts libres en pool)`
+        : 'Memoria llena: Borra un archivo para liberar ranuras en la memoria Flash';
+    }
+    if (this.btnClearAllFlash) {
+      this.btnClearAllFlash.disabled = (customCount === 0 || !this.activeComm || !this.activeComm.isConnected);
+    }
 
     if (files.length === 0) {
       this.fileTableBody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#64748b;">No hay archivos almacenados</td></tr>`;
@@ -934,22 +1336,44 @@ class App {
         tr.style.backgroundColor = '#e0f2fe';
       }
 
+      let actionsHtml = `
+        <button class="btn btn-outline btn-select-file" style="padding:0.2rem 0.5rem; font-size:0.75rem; min-height:28px;" data-file="${f.name}">
+          ▶ Seleccionar
+        </button>
+      `;
+      if (f.type === 'FLASH') {
+        actionsHtml += `
+          <button class="btn btn-outline btn-delete-file" style="padding:0.2rem 0.45rem; font-size:0.75rem; min-height:28px; color:#ef4444; border-color:#fca5a5; margin-left:0.35rem;" data-file="${f.name}" title="Borrar este archivo de la memoria Flash">
+            🗑️ Borrar
+          </button>
+        `;
+      }
+
       tr.innerHTML = `
         <td><strong>${f.name}</strong></td>
         <td><span class="badge ${f.type === 'ROM' ? 'badge-rom' : 'badge-flash'}">${f.type}</span></td>
         <td>${f.samples} pts @ ${f.samplingRate} Hz</td>
-        <td>
-          <button class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.75rem; min-height:28px;" data-file="${f.name}">
-            ▶ Seleccionar
-          </button>
-        </td>
+        <td>${actionsHtml}</td>
       `;
 
-      tr.querySelector('button').addEventListener('click', () => {
-        this.selectedFile = f.name;
-        this.renderFileList(this.filesOnDevice);
-        this.playSelectedFile();
-      });
+      const btnSelect = tr.querySelector('.btn-select-file');
+      if (btnSelect) {
+        btnSelect.addEventListener('click', () => {
+          this.selectedFile = f.name;
+          this.renderFileList(this.filesOnDevice);
+          this.playSelectedFile();
+        });
+      }
+
+      const btnDelete = tr.querySelector('.btn-delete-file');
+      if (btnDelete) {
+        btnDelete.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (confirm(`¿Estás seguro de que deseas borrar "${f.name}" de la memoria Flash del Arduino?`)) {
+            this.deleteFileFromDevice(f.name);
+          }
+        });
+      }
 
       this.fileTableBody.appendChild(tr);
     });

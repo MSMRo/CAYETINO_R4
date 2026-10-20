@@ -47,7 +47,6 @@ private:
 #if HAS_FSP_TIMER
   FspTimer _timer;
   bool _timerInitialized;
-  bool startHardwareTimer(float frequencyHz);
-  void stopHardwareTimer();
+  bool setupTimerOnce();
 #endif
 };

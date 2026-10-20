@@ -48,8 +48,8 @@ export class SignalGenerator {
     const halfVpp = vpp / 2.0;
 
     for (let i = 0; i < totalSamples; i++) {
-      const t = i / samplingRate;
-      const phase = (t % period) / period;
+      const cycles = (i * freq) / samplingRate;
+      const phase = cycles - Math.floor(cycles);
       const v = offset + (phase < dutyFraction ? halfVpp : -halfVpp);
       samples[i] = SignalGenerator.voltageToDac(v);
     }
@@ -68,14 +68,13 @@ export class SignalGenerator {
   static generateTriangle(duration = 4.0, samplingRate = 250, freq = 2.0, vpp = 4.0, offset = 2.5) {
     const totalSamples = Math.floor(duration * samplingRate);
     const samples = new Uint16Array(totalSamples);
-    const period = 1.0 / freq;
     const halfVpp = vpp / 2.0;
 
     for (let i = 0; i < totalSamples; i++) {
-      const t = i / samplingRate;
-      const phase = (t % period) / period;
+      const cycles = (i * freq) / samplingRate;
+      const phase = cycles - Math.floor(cycles);
       // Triangular function from -1 to +1
-      const triNorm = phase < 0.5 ? (4 * phase - 1) : (3 - 4 * phase);
+      const triNorm = phase < 0.5 ? (4.0 * phase - 1.0) : (3.0 - 4.0 * phase);
       const v = offset + halfVpp * triNorm;
       samples[i] = SignalGenerator.voltageToDac(v);
     }
@@ -94,12 +93,11 @@ export class SignalGenerator {
   static generateSawtooth(duration = 4.0, samplingRate = 250, freq = 2.0, vpp = 4.0, offset = 2.5) {
     const totalSamples = Math.floor(duration * samplingRate);
     const samples = new Uint16Array(totalSamples);
-    const period = 1.0 / freq;
     const halfVpp = vpp / 2.0;
 
     for (let i = 0; i < totalSamples; i++) {
-      const t = i / samplingRate;
-      const phase = (t % period) / period;
+      const cycles = (i * freq) / samplingRate;
+      const phase = cycles - Math.floor(cycles);
       const sawNorm = 2.0 * phase - 1.0;
       const v = offset + halfVpp * sawNorm;
       samples[i] = SignalGenerator.voltageToDac(v);

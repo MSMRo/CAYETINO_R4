@@ -45,6 +45,43 @@ export class Protocol {
     return packets;
   }
 
+  /**
+   * Packetize samples for Live RAM Preview streaming without saving to Flash
+   */
+  static createPreviewPackets(name, samplingRate, samples, chunkSize = 20, loop = true) {
+    const packets = [];
+    const cleanName = name.replace(/[^A-Za-z0-9_.]/g, '').toUpperCase().substring(0, 16);
+
+    // Header command: PREVIEW <name> <fs> <count>
+    packets.push({
+      type: 'PREVIEW_INIT',
+      command: `PREVIEW ${cleanName} ${samplingRate} ${samples.length}\n`,
+      seq: 0
+    });
+
+    // Data chunks
+    let seq = 1;
+    for (let i = 0; i < samples.length; i += chunkSize) {
+      const slice = samples.slice(i, i + chunkSize);
+      const dataStr = slice.join(',');
+      packets.push({
+        type: 'DATA',
+        command: `D ${seq} ${dataStr}\n`,
+        seq: seq
+      });
+      seq++;
+    }
+
+    // Run preview command: PRUN <loop>
+    packets.push({
+      type: 'PREVIEW_RUN',
+      command: `PRUN ${loop ? 1 : 0}\n`,
+      seq: seq
+    });
+
+    return packets;
+  }
+
   static createPlayCommand(filename, loop = true) {
     const cleanName = filename.replace(/[^A-Za-z0-9_.]/g, '').toUpperCase();
     return `PLAY ${cleanName} ${loop ? 1 : 0}\n`;
@@ -60,6 +97,11 @@ export class Protocol {
 
   static createStatusCommand() {
     return `STATUS\n`;
+  }
+
+  static createDeleteCommand(filename) {
+    const cleanName = filename.replace(/[^A-Za-z0-9_.]/g, '').toUpperCase();
+    return `DELETE ${cleanName}\n`;
   }
 
   /**
@@ -94,6 +136,18 @@ export class Protocol {
       return { type: 'FILE_LIST', files };
     }
 
+    if (line.startsWith('CAPACITY:')) {
+      // Format: CAPACITY:<usedSlots>:<maxSlots>:<poolUsed>:<poolMax>
+      const parts = line.substring(9).split(':');
+      return {
+        type: 'CAPACITY',
+        usedSlots: parseInt(parts[0] || '0', 10),
+        maxSlots: parseInt(parts[1] || '8', 10),
+        poolUsed: parseInt(parts[2] || '0', 10),
+        poolMax: parseInt(parts[3] || '4000', 10)
+      };
+    }
+
     if (line.startsWith('STATUS:')) {
       // Format: STATUS:STATE:FILE:CURRENT_INDEX:FS
       const parts = line.split(':');
@@ -111,6 +165,10 @@ export class Protocol {
       return { type: 'ACK', seq: parseInt(parts[1] || '0', 10) };
     }
 
+    if (line.startsWith('OK PLAYING PREVIEW')) {
+      return { type: 'PLAYING_PREVIEW', file: line.substring(18).trim() };
+    }
+
     if (line.startsWith('OK PLAYING')) {
       return { type: 'PLAYING', file: line.substring(11).trim() };
     }
@@ -121,6 +179,14 @@ export class Protocol {
 
     if (line.startsWith('OK SAVED')) {
       return { type: 'SAVED', file: line.substring(9).trim() };
+    }
+
+    if (line.startsWith('OK DELETED')) {
+      return { type: 'DELETED', file: line.substring(10).trim() };
+    }
+
+    if (line.startsWith('OK READY PREVIEW')) {
+      return { type: 'READY_PREVIEW' };
     }
 
     if (line.startsWith('OK READY')) {

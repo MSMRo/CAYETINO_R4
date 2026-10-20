@@ -7,8 +7,13 @@
 #include <string.h>
 
 FileStorage::FileStorage()
-  : _totalFiles(0), _customCount(0), _isWriting(false),
-    _activeSlot(0), _writeIndex(0), _expectedSamples(0), _writingFs(250) {
+  : _totalFiles(0), _customCount(0), _poolUsed(0), _isWriting(false),
+    _writeIndex(0), _expectedSamples(0), _writingFs(250),
+    _isPreviewWriting(false), _isPreviewActive(false),
+    _previewWriteIndex(0), _previewExpected(0), _previewFs(250) {
+  memset(_samplePool, 0, sizeof(_samplePool));
+  memset(_previewBuffer, 0, sizeof(_previewBuffer));
+  memset(&_previewEntry, 0, sizeof(WaveformEntry));
 }
 
 void FileStorage::init() {
@@ -94,30 +99,25 @@ int8_t FileStorage::findFileIndex(const char* name) {
 }
 
 bool FileStorage::startWrite(const char* filename, uint16_t samplingRate, uint16_t totalSamples) {
-  if (totalSamples > MAX_CUSTOM_SAMPLES) {
-    return false; // exceeds buffer capacity
+  if (_isWriting || _isPreviewWriting) return false;
+  if (totalSamples == 0 || totalSamples > MAX_SAMPLES_PER_FILE) return false;
+
+  // Check if file already exists in custom slots (reclaim space by deleting old version)
+  int8_t existingIdx = findFileIndex(filename);
+  if (existingIdx >= 5) {
+    deleteFile(filename);
   }
 
-  // Check if file already exists in custom slots to overwrite
-  int slot = -1;
-  for (uint8_t i = 5; i < _totalFiles; i++) {
-    if (strcasecmp(_entries[i].name, filename) == 0) {
-      slot = i - 5;
-      break;
-    }
+  // Check if slot capacity is full
+  if (_customCount >= MAX_CUSTOM_FILES) {
+    return false; // All 8 slots occupied
   }
 
-  if (slot < 0) {
-    // New slot
-    if (_customCount < MAX_CUSTOM_FILES) {
-      slot = _customCount;
-    } else {
-      // Overwrite oldest custom slot (round robin)
-      slot = 0;
-    }
+  // Check if pool capacity has enough room
+  if (_poolUsed + totalSamples > CUSTOM_POOL_SAMPLES) {
+    return false; // Shared pool capacity exceeded
   }
 
-  _activeSlot = slot;
   _isWriting = true;
   _writeIndex = 0;
   _expectedSamples = totalSamples;
@@ -130,10 +130,11 @@ bool FileStorage::startWrite(const char* filename, uint16_t samplingRate, uint16
 
 bool FileStorage::appendSamples(const uint16_t* samples, uint16_t count) {
   if (!_isWriting) return false;
-  if (_writeIndex + count > MAX_CUSTOM_SAMPLES) return false;
+  if (_poolUsed + _writeIndex + count > CUSTOM_POOL_SAMPLES) return false;
+  if (_writeIndex + count > _expectedSamples) return false;
 
   for (uint16_t i = 0; i < count; i++) {
-    _customBuffers[_activeSlot][_writeIndex++] = samples[i];
+    _samplePool[_poolUsed + _writeIndex++] = samples[i];
   }
   return true;
 }
@@ -141,18 +142,17 @@ bool FileStorage::appendSamples(const uint16_t* samples, uint16_t count) {
 bool FileStorage::commitWrite() {
   if (!_isWriting) return false;
 
-  uint8_t entryIdx = 5 + _activeSlot;
+  uint8_t entryIdx = 5 + _customCount;
   strncpy(_entries[entryIdx].name, _writingName, 17);
   _entries[entryIdx].samplingRate = _writingFs;
   _entries[entryIdx].length = _writeIndex;
   _entries[entryIdx].isRom = false;
   _entries[entryIdx].dataRom = nullptr;
-  _entries[entryIdx].dataRam = _customBuffers[_activeSlot];
+  _entries[entryIdx].dataRam = &_samplePool[_poolUsed];
 
-  if (_activeSlot >= _customCount) {
-    _customCount = _activeSlot + 1;
-    _totalFiles = 5 + _customCount;
-  }
+  _poolUsed += _writeIndex;
+  _customCount++;
+  _totalFiles = 5 + _customCount;
 
   _isWriting = false;
   return true;
@@ -161,6 +161,97 @@ bool FileStorage::commitWrite() {
 void FileStorage::abortWrite() {
   _isWriting = false;
   _writeIndex = 0;
+}
+
+bool FileStorage::deleteFile(const char* name) {
+  int8_t idx = findFileIndex(name);
+  if (idx < 5) {
+    return false; // Cannot delete preloaded ROM files (indices 0 to 4)
+  }
+
+  uint8_t slotToDelete = idx - 5;
+  if (slotToDelete >= _customCount) {
+    return false;
+  }
+
+  uint16_t delLen = _entries[idx].length;
+  uint16_t delOffset = _entries[idx].dataRam - _samplePool;
+
+  // Move subsequent pool samples down to keep pool contiguous
+  uint16_t samplesToMove = _poolUsed - (delOffset + delLen);
+  if (samplesToMove > 0) {
+    memmove(&_samplePool[delOffset], &_samplePool[delOffset + delLen], samplesToMove * sizeof(uint16_t));
+  }
+  _poolUsed -= delLen;
+
+  // Shift subsequent custom slots down and adjust their dataRam pointers
+  for (uint8_t s = slotToDelete; s < _customCount - 1; s++) {
+    _entries[5 + s] = _entries[5 + s + 1];
+    _entries[5 + s].dataRam -= delLen;
+  }
+
+  _customCount--;
+  _totalFiles = 5 + _customCount;
+
+  // Clear vacant slot
+  memset(&_entries[5 + _customCount], 0, sizeof(WaveformEntry));
+
+  return true;
+}
+
+bool FileStorage::deleteAllCustomFiles() {
+  for (uint8_t s = 0; s < MAX_CUSTOM_FILES; s++) {
+    memset(&_entries[5 + s], 0, sizeof(WaveformEntry));
+  }
+  _customCount = 0;
+  _totalFiles = 5;
+  _poolUsed = 0;
+  return true;
+}
+
+// ----------------------------------------------------------------------------
+// LIVE RAM PREVIEW METHODS (Instant Playback without occupying storage slots)
+// ----------------------------------------------------------------------------
+bool FileStorage::startPreviewWrite(const char* name, uint16_t samplingRate, uint16_t totalSamples) {
+  if (_isWriting || _isPreviewWriting) return false;
+  if (totalSamples == 0 || totalSamples > MAX_PREVIEW_SAMPLES) return false;
+
+  _isPreviewWriting = true;
+  _previewWriteIndex = 0;
+  _previewExpected = totalSamples;
+  _previewFs = samplingRate > 0 ? samplingRate : 250;
+  strncpy(_previewName, name, 16);
+  _previewName[16] = '\0';
+  return true;
+}
+
+bool FileStorage::appendPreviewSamples(const uint16_t* samples, uint16_t count) {
+  if (!_isPreviewWriting) return false;
+  if (_previewWriteIndex + count > MAX_PREVIEW_SAMPLES) return false;
+
+  for (uint16_t i = 0; i < count; i++) {
+    _previewBuffer[_previewWriteIndex++] = samples[i];
+  }
+  return true;
+}
+
+bool FileStorage::commitPreviewWrite() {
+  if (!_isPreviewWriting) return false;
+
+  strncpy(_previewEntry.name, _previewName, 17);
+  _previewEntry.samplingRate = _previewFs;
+  _previewEntry.length = _previewWriteIndex;
+  _previewEntry.isRom = false;
+  _previewEntry.dataRom = nullptr;
+  _previewEntry.dataRam = _previewBuffer;
+
+  _isPreviewWriting = false;
+  _isPreviewActive = true;
+  return true;
+}
+
+void FileStorage::abortPreviewWrite() {
+  _isPreviewWriting = false;
 }
 
 uint16_t FileStorage::getSample(const WaveformEntry* entry, uint16_t index) {
