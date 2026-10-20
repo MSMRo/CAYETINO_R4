@@ -94,9 +94,12 @@ bool lastPlayState = false;
 unsigned long lastLcdUpdate = 0;
 bool heartBeatBlink = false;
 
-// Serial reception buffer
+// Serial and BLE reception buffers
 char serialBuffer[128];
 uint8_t serialBufferIdx = 0;
+
+char bleBuffer[128];
+uint8_t bleBufferIdx = 0;
 
 // Forward declarations
 void updateLcdDisplay(bool forceFull);
@@ -336,9 +339,23 @@ void handleBleInput() {
   if (central && central.connected()) {
     if (rxChar.written()) {
       String received = rxChar.value();
-      comm.processLine(received.c_str(), blePrint);
-      blePrint.flushBuffer();
-      updateLcdDisplay(true);
+      for (unsigned int i = 0; i < received.length(); i++) {
+        char c = received[i];
+        if (c == '\r') continue;
+        if (c == '\n') {
+          bleBuffer[bleBufferIdx] = '\0';
+          if (bleBufferIdx > 0) {
+            comm.processLine(bleBuffer, blePrint);
+            blePrint.flushBuffer();
+            updateLcdDisplay(true);
+          }
+          bleBufferIdx = 0;
+        } else {
+          if (bleBufferIdx < sizeof(bleBuffer) - 1) {
+            bleBuffer[bleBufferIdx++] = c;
+          }
+        }
+      }
     }
   }
 }

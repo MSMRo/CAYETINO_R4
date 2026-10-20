@@ -1,5 +1,6 @@
 /**
  * Web Bluetooth API Driver for Arduino Uno R4 WiFi (Nordic UART Service)
+ * Fully compatible with ArduinoBLE and mobile browsers (Chrome Android, Bluefy iOS).
  */
 
 export class BleComm {
@@ -25,7 +26,7 @@ export class BleComm {
 
   async connect() {
     if (!BleComm.isSupported()) {
-      throw new Error('Web Bluetooth API no está soportada en este navegador o sistema operativo.');
+      throw new Error('Web Bluetooth no está soportado en este navegador. Utiliza Google Chrome, Edge u Opera en PC o Android, o Bluefy en iOS.');
     }
 
     try {
@@ -90,14 +91,24 @@ export class BleComm {
     const encoder = new TextEncoder();
     const data = encoder.encode(text);
     
-    // BLE packet chunking (typical MTU payload 20 bytes for maximum compatibility)
+    // BLE packet chunking: 20 bytes is universal MTU default for BLE
     const chunkSize = 20;
     for (let i = 0; i < data.length; i += chunkSize) {
       const chunk = data.slice(i, i + chunkSize);
-      await this.rxCharacteristic.writeValueWithoutResponse(chunk);
-      // Brief yield to avoid BLE queue congestion
+      try {
+        if (this.rxCharacteristic.writeValueWithoutResponse) {
+          await this.rxCharacteristic.writeValueWithoutResponse(chunk);
+        } else {
+          await this.rxCharacteristic.writeValue(chunk);
+        }
+      } catch (err) {
+        // Fallback to writeValue if writeValueWithoutResponse fails
+        await this.rxCharacteristic.writeValue(chunk);
+      }
+      
+      // Delay between chunks to let Arduino Uno R4 / ESP32 BLE stack process
       if (data.length > chunkSize) {
-        await new Promise(r => setTimeout(r, 8));
+        await new Promise(r => setTimeout(r, 15));
       }
     }
   }

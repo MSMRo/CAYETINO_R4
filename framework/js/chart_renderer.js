@@ -1,7 +1,8 @@
 /**
  * Waveform Canvas Oscilloscope Renderer
- * High-performance, responsive HTML5 canvas renderer with ECG/biomedical grid,
- * zoom, hover crosshairs, and live playback cursor.
+ * High-performance, stable HTML5 canvas renderer with
+ * biomedical grid, touch & mouse crosshair tracking, and live playhead.
+ * Guaranteed fixed aspect ratio with zero layout feedback loops.
  */
 
 export class WaveformRenderer {
@@ -14,27 +15,67 @@ export class WaveformRenderer {
     this.isHovering = false;
     this.hoverX = 0;
     this.hoverY = 0;
+    this.cssWidth = 0;
+    this.cssHeight = 0;
+    this.resizePending = false;
 
     this.initCanvas();
     this.attachEvents();
   }
 
   initCanvas() {
-    const dpr = window.devicePixelRatio || 1;
+    if (!this.canvas) return;
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = (rect.width || 800) * dpr;
-    this.canvas.height = (rect.height || 280) * dpr;
-    this.ctx.scale(dpr, dpr);
-    this.cssWidth = rect.width || 800;
-    this.cssHeight = rect.height || 280;
+    const width = Math.floor(rect.width);
+    const height = Math.floor(rect.height);
+
+    if (width <= 0 || height <= 0) return;
+
+    // Guard: Only reconfigure if pixel dimensions actually changed
+    if (width === this.cssWidth && height === this.cssHeight) {
+      return;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    this.cssWidth = width;
+    this.cssHeight = height;
+
+    // Set internal canvas pixel dimensions (NEVER modify canvas.style.width/height in JS)
+    this.canvas.width = Math.round(width * dpr);
+    this.canvas.height = Math.round(height * dpr);
+
+    // Apply scale for DPR
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.render();
   }
 
   attachEvents() {
-    window.addEventListener('resize', () => {
-      this.initCanvas();
-    });
+    const handleResize = () => {
+      if (this.resizePending) return;
+      this.resizePending = true;
+      requestAnimationFrame(() => {
+        this.resizePending = false;
+        this.initCanvas();
+      });
+    };
 
+    window.addEventListener('resize', handleResize);
+
+    // ResizeObserver watches container resizing (device rotation, mobile browser URL bar, etc.)
+    if (window.ResizeObserver && this.canvas.parentElement) {
+      this.resizeObserver = new ResizeObserver((entries) => {
+        if (!entries || !entries[0]) return;
+        const cr = entries[0].contentRect;
+        const w = Math.floor(cr.width);
+        const h = Math.floor(cr.height);
+        if (w > 0 && h > 0 && (Math.abs(w - this.cssWidth) >= 2 || Math.abs(h - this.cssHeight) >= 2)) {
+          handleResize();
+        }
+      });
+      this.resizeObserver.observe(this.canvas.parentElement);
+    }
+
+    // Mouse Tracking
     this.canvas.addEventListener('mousemove', (e) => {
       const rect = this.canvas.getBoundingClientRect();
       this.isHovering = true;
@@ -46,6 +87,33 @@ export class WaveformRenderer {
     this.canvas.addEventListener('mouseleave', () => {
       this.isHovering = false;
       this.render();
+    });
+
+    // Touch Tracking for Smartphones & Tablets
+    const handleTouch = (e) => {
+      if (e.touches && e.touches.length > 0) {
+        const touch = e.touches[0];
+        const rect = this.canvas.getBoundingClientRect();
+        this.isHovering = true;
+        this.hoverX = touch.clientX - rect.left;
+        this.hoverY = touch.clientY - rect.top;
+        this.render();
+      }
+    };
+
+    this.canvas.addEventListener('touchstart', (e) => {
+      handleTouch(e);
+    }, { passive: true });
+
+    this.canvas.addEventListener('touchmove', (e) => {
+      handleTouch(e);
+    }, { passive: true });
+
+    this.canvas.addEventListener('touchend', () => {
+      setTimeout(() => {
+        this.isHovering = false;
+        this.render();
+      }, 1500);
     });
   }
 
@@ -63,29 +131,19 @@ export class WaveformRenderer {
 
   render() {
     const ctx = this.ctx;
-    const w = this.cssWidth;
-    const h = this.cssHeight;
+    const w = this.cssWidth || 800;
+    const h = this.cssHeight || 280;
 
-    // Clear background
+    // Background
     ctx.fillStyle = '#060911';
     ctx.fillRect(0, 0, w, h);
 
-    // Draw Grid Lines (Medical Oscilloscope Style)
+    // Biomedical Oscilloscope Grid
     this.drawGrid(w, h);
 
-    if (!this.samples || this.samples.length === 0) {
-      // Empty state prompt
-      ctx.fillStyle = '#64748b';
-      ctx.font = '13px ' + getComputedStyle(document.body).fontFamily;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('Sin señal cargada. Selecciona una señal o genera una nueva.', w / 2, h / 2);
-      return;
-    }
-
-    // Draw Baseline (2048 = midpoint for 12-bit DAC, ~2.5V)
-    const midY = h - (2048 / 4095.0) * h;
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+    // Baseline (DAC 2048 = 2.5V reference for Uno R4 DAC on Pin A0)
+    const midY = h - (2048 / 4095.0) * (h - 24) - 12;
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.3)';
     ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -94,19 +152,31 @@ export class WaveformRenderer {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Plot Waveform Trace
+    if (!this.samples || this.samples.length === 0) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '13px ' + (getComputedStyle(document.body).fontFamily || 'sans-serif');
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⚡ Osciloscopio en espera. Selecciona una señal o pulsa "Generar" para comenzar.', w / 2, h / 2 - 14);
+      ctx.fillStyle = '#64748b';
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText('Línea punteada central: Nivel de reposo DAC A0 (2.5V / 2048)', w / 2, h / 2 + 12);
+      return;
+    }
+
+    // Static Waveform Trace (Rock solid, no stretching)
     ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 1.8;
-    ctx.shadowColor = 'rgba(56, 189, 248, 0.4)';
+    ctx.lineWidth = 2.0;
+    ctx.shadowColor = 'rgba(56, 189, 248, 0.45)';
     ctx.shadowBlur = 6;
     ctx.beginPath();
 
     const n = this.samples.length;
     for (let i = 0; i < n; i++) {
       const x = (i / (n - 1)) * w;
-      // Invert Y: 4095 is top (0), 0 is bottom (h)
       const val = this.samples[i];
-      const y = h - (val / 4095.0) * (h - 20) - 10;
+      // Invert Y: 4095 is top (12px margin), 0 is bottom (h - 12px margin)
+      const y = h - (val / 4095.0) * (h - 24) - 12;
       if (i === 0) {
         ctx.moveTo(x, y);
       } else {
@@ -114,9 +184,9 @@ export class WaveformRenderer {
       }
     }
     ctx.stroke();
-    ctx.shadowBlur = 0; // reset shadow
+    ctx.shadowBlur = 0; // reset glow
 
-    // Draw Playhead if active
+    // Playhead Cursor
     if (this.playheadIndex >= 0 && this.playheadIndex < n) {
       const phX = (this.playheadIndex / (n - 1)) * w;
       ctx.strokeStyle = '#f59e0b';
@@ -130,56 +200,59 @@ export class WaveformRenderer {
       ctx.shadowBlur = 0;
     }
 
-    // Draw Hover Crosshair and Tooltip
+    // Touch / Mouse Measurement Crosshair
     if (this.isHovering && n > 0) {
       const hoverFraction = Math.max(0, Math.min(1, this.hoverX / w));
       const sampleIdx = Math.round(hoverFraction * (n - 1));
       const val = this.samples[sampleIdx];
       const timeSec = (sampleIdx / this.samplingRate).toFixed(3);
       const voltage = ((val / 4095.0) * 5.0).toFixed(3);
-      const valY = h - (val / 4095.0) * (h - 20) - 10;
+      const valY = h - (val / 4095.0) * (h - 24) - 12;
 
       // Vertical line
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(this.hoverX, 0);
       ctx.lineTo(this.hoverX, h);
       ctx.stroke();
 
-      // Dot on curve
+      // Target dot
       ctx.fillStyle = '#10b981';
       ctx.beginPath();
-      ctx.arc(this.hoverX, valY, 4, 0, Math.PI * 2);
+      ctx.arc(this.hoverX, valY, 4.5, 0, Math.PI * 2);
       ctx.fill();
 
       // Tooltip box
       const text = `#${sampleIdx} | t=${timeSec}s | DAC: ${val} (${voltage}V)`;
-      ctx.font = '11px monospace';
+      ctx.font = '11px ui-monospace, monospace';
       const textWidth = ctx.measureText(text).width;
       let boxX = this.hoverX + 10;
       if (boxX + textWidth + 16 > w) boxX = this.hoverX - textWidth - 16;
-      let boxY = this.hoverY - 26;
-      if (boxY < 10) boxY = this.hoverY + 16;
+      let boxY = this.hoverY - 28;
+      if (boxY < 8) boxY = this.hoverY + 16;
 
-      ctx.fillStyle = 'rgba(18, 25, 39, 0.9)';
-      ctx.strokeStyle = '#23314d';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+      ctx.strokeStyle = '#334155';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(boxX, boxY, textWidth + 12, 22, 4);
+      if (ctx.roundRect) {
+        ctx.roundRect(boxX, boxY, textWidth + 14, 24, 4);
+      } else {
+        ctx.rect(boxX, boxY, textWidth + 14, 24);
+      }
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = '#38bdf8';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(text, boxX + 6, boxY + 11);
+      ctx.fillText(text, boxX + 7, boxY + 12);
     }
   }
 
   drawGrid(w, h) {
     const ctx = this.ctx;
-    // Minor grid
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.05)';
     ctx.lineWidth = 1;
     const stepX = 25;
@@ -211,9 +284,9 @@ export class WaveformRenderer {
     }
     ctx.stroke();
 
-    // Voltage scale ticks on left
-    ctx.fillStyle = 'rgba(148, 163, 184, 0.5)';
-    ctx.font = '10px monospace';
+    // Voltage scale ticks
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.65)';
+    ctx.font = '10px ui-monospace, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('5.0V (4095)', 6, 4);
