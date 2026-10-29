@@ -125,21 +125,4 @@ Gracias a las señales precargadas en la memoria Flash ROM del microcontrolador 
 
 ---
 
-### 5. Despliegue en GitHub Pages
 
-La carpeta `framework/` y el archivo raíz `index.html` están optimizados para operar sin backend ni compiladores adicionales:
-
-1. Crea un repositorio en GitHub y sube todo el contenido del proyecto:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit - Cayetino R4 biomedical system"
-   git branch -M main
-   git remote add origin https://github.com/<TU_USUARIO>/<TU_REPOSITORIO>.git
-   git push -u origin main
-   ```
-2. En tu repositorio de GitHub, dirígete a **Settings > Pages**.
-3. En **Build and deployment > Source**, selecciona:
-   - **Branch:** `main`
-   - **Folder:** `/ (root)`
-4. Guarda los cambios. Tu aplicación estará disponible públicamente bajo HTTPS (requisito indispensable para que los navegadores permitan Web Serial y Web Bluetooth).
